@@ -1,5 +1,10 @@
 # Example deployment for the CLI-free Codex Web frontend.
 # The Codex CLI and `codex app-server` must run in a separate container.
+# `ghcr.io/icoretech/codex-docker:latest` is one possible companion image, not
+# a required dependency. Any other image can be used if it provides a compatible
+# `codex app-server` over ws://, wss://, or a shared Unix socket.
+# At the time of writing, `latest` corresponds to Codex CLI version 0.151.0;
+# use `ghcr.io/icoretech/codex-docker:0.151.0` to pin this exact version.
 
 services:
   codex-web:
@@ -13,6 +18,7 @@ services:
     environment:
       # The hostname must resolve to the separate app-server container on the
       # shared `codex` network. Change it if that container has another name.
+      # Accepted transports are ws://, wss://, and unix:///absolute/socket/path.
       CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
 
       # Optional connection limits and their defaults:
