@@ -22,6 +22,11 @@ services:
       # Accepted transports are ws://, wss://, and unix:///absolute/socket/path.
       CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
 
+      # Optional URL path below which the complete web application is served.
+      # Keep `/` for a dedicated host name, or use a path ending in `/`, such as
+      # `/my/example/subdir/`. The reverse proxy must preserve this prefix.
+      CODEX_WEB_BASE_PATH: ${CODEX_WEB_BASE_PATH:-/}
+
       # Optional connection limits and their defaults:
       # CODEX_APP_SERVER_MAX_PAYLOAD: 104857600
       # CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: 10000

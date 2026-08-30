@@ -20,6 +20,8 @@
     "prepare:asar": "./scripts/prepare_asar",
     "preserver": "npm run build:server && npm run build:browser",
     "server": "CODEX_CLI_PATH=$(which codex) node src/server/main.js",
+    "test:base-path": "node --experimental-strip-types --test test/base-path.test.mjs",
+    "test:base-path-server": "npm run build:server && node --test test/base-path-server.test.mjs",
     "test:docker-proxy": "node --test test/codex-app-server-proxy.test.mjs"
   },
   "repository": "https://github.com/0-99/codex-web-docker.git",

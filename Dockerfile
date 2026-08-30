@@ -62,6 +62,7 @@ ENV NODE_ENV=production \
     HOME=/home/node \
     HOST=0.0.0.0 \
     PORT=8214 \
+    CODEX_WEB_BASE_PATH=/ \
     CODEX_CLI_PATH=/opt/codex-web/docker/codex-app-server-proxy.mjs
 
 LABEL org.opencontainers.image.source="https://github.com/0-99/codex-web-docker" \
@@ -84,6 +85,6 @@ USER node
 EXPOSE 8214
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD ["node", "-e", "fetch('http://127.0.0.1:8214/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+  CMD ["node", "-e", "fetch(new URL(process.env.CODEX_WEB_BASE_PATH||'/', 'http://127.0.0.1:8214')).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 CMD ["node", "src/server/main.js", "--host", "0.0.0.0", "--port", "8214"]
