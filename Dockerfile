@@ -1,29 +1,60 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:22-alpine AS builder
+ARG ALPINE_VERSION=3.22
+
+# The web assets and compiled server JavaScript are architecture-independent.
+# Build them once on the native GitHub runner instead of repeating this work
+# under QEMU for every target architecture.
+FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS builder
 
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
 RUN apk add --no-cache \
       bash \
       curl \
-      g++ \
-      make \
+      nodejs \
+      npm \
       patch \
-      python3 \
       unzip
 
 WORKDIR /opt/codex-web
 COPY . .
 
-RUN npm ci --no-audit --no-fund \
-    && npm prune --omit=dev --ignore-scripts \
+RUN npm ci --ignore-scripts --no-audit --no-fund \
+    && npm rebuild sharp \
+    && npm run prepare \
     && find scratch/asar -type f -name '*.map' -delete \
     && find src/server -type f ! -name '*.js' -delete \
     && rm -rf scratch/asar/node_modules \
     && npm cache clean --force
 
-FROM node:22-alpine AS runtime
+# Alpine provides Node.js 22 for every target platform, including ppc64le.
+# Compile the only native runtime dependency separately for each target.
+FROM alpine:${ALPINE_VERSION} AS production-dependencies
+
+WORKDIR /opt/codex-web
+COPY package.json package-lock.json ./
+
+RUN apk add --no-cache \
+      g++ \
+      make \
+      nodejs \
+      nodejs-dev \
+      npm \
+      python3
+
+# node-gyp expects common.gypi at the Node source root, while Alpine packages
+# it with the other headers. The link lets it reuse Alpine's local headers.
+RUN ln -s /usr/include/node/common.gypi /usr/common.gypi \
+    && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+    && npm_config_build_from_source=true npm_config_nodedir=/usr npm rebuild better-sqlite3 \
+    && npm cache clean --force
+
+FROM alpine:${ALPINE_VERSION} AS runtime
+
+RUN apk add --no-cache nodejs \
+    && addgroup -g 1000 node \
+    && adduser -D -u 1000 -G node node
 
 ARG SOURCE_REVISION=unknown
 
@@ -40,7 +71,7 @@ LABEL org.opencontainers.image.source="https://github.com/0-99/codex-web-docker"
 
 WORKDIR /opt/codex-web
 
-COPY --from=builder --chown=node:node /opt/codex-web/node_modules ./node_modules
+COPY --from=production-dependencies --chown=node:node /opt/codex-web/node_modules ./node_modules
 COPY --from=builder --chown=node:node /opt/codex-web/src/server ./src/server
 COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/package.json ./scratch/asar/package.json
 COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/.vite/build ./scratch/asar/.vite/build

@@ -9,6 +9,9 @@ Published platforms:
 
 - `linux/amd64`
 - `linux/arm64`
+- `linux/ppc64le`
+- `linux/s390x`
+- `linux/arm/v7`
 
 ## Connection to the app-server
 
@@ -72,7 +75,7 @@ VPN in front of the web UI before exposing it beyond a trusted network.
 ## Docker Hub publishing
 
 The GitHub Actions workflow publishes releases to `0to99/codex-web-docker` on
-Docker Hub for both supported platforms. Configure these repository secrets:
+Docker Hub for all supported platforms. Configure these repository secrets:
 
 - `DOCKER_USERNAME`
 - `DOCKER_PASSWORD` (use a Docker Hub access token)
