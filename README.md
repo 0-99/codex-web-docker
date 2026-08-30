@@ -2,7 +2,7 @@
 
 a browser frontend for codex desktop, running on a machine you control.
 
-> This fork also provides a small, CLI-free multi-architecture Docker image
+> This fork also provides a CLI-free multi-architecture Docker image
 > that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
 > [`ghcr.io/icoretech/codex-docker:latest`](https://github.com/icoretech/codex-docker)
 > is one possible companion image when running the Codex CLI in another
