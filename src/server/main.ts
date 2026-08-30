@@ -16,11 +16,21 @@ import Fastify from "fastify";
 import fastifyMultipart from "@fastify/multipart";
 import fastifyStatic from "@fastify/static";
 import { installModuleAliasHook } from "./module";
+import {
+  basePathWithoutTrailingSlash,
+  normalizeBasePath,
+  pathAtBase,
+} from "./base-path";
 import { glob } from "glob";
 
-type ServerOptions = {
+export type ServerOptions = {
+  basePath: string;
   host: string;
   port: number;
+};
+
+type StartServerOptions = {
+  startMainApp?: boolean;
 };
 
 type RendererToMainMessage =
@@ -239,15 +249,16 @@ function printUsage(): void {
   console.log(
     [
       "Usage:",
-      "  server [--host <host>] [--port <port>]",
+      "  server [--base-path <path>] [--host <host>] [--port <port>]",
       "",
       "Defaults:",
+      "  --base-path $CODEX_WEB_BASE_PATH or /",
       "  --host 127.0.0.1",
       "  --port 8214",
       "",
       "Examples:",
       "  yarn server",
-      "  yarn server --port 9000",
+      "  yarn server --base-path /my/example/subdir/ --port 9000",
     ].join("\n"),
   );
 }
@@ -265,6 +276,9 @@ function parseServerArgs(args: string[]): ServerOptions {
     args,
     allowPositionals: false,
     options: {
+      "base-path": {
+        type: "string",
+      },
       help: {
         short: "h",
         type: "boolean",
@@ -285,6 +299,9 @@ function parseServerArgs(args: string[]): ServerOptions {
   }
 
   return {
+    basePath: normalizeBasePath(
+      parsed.values["base-path"] ?? process.env.CODEX_WEB_BASE_PATH,
+    ),
     host: parsed.values.host ?? "127.0.0.1",
     port: parsed.values.port ? parsePort(parsed.values.port) : 8214,
   };
@@ -373,11 +390,35 @@ function ensureElectronLikeProcessContext(): void {
   processWithElectronFields.type ??= "browser";
 }
 
-async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
+export async function startIpcBridgeServer(
+  options: ServerOptions,
+  { startMainApp = true }: StartServerOptions = {},
+) {
   const bridgeState = getIpcMainBridgeState();
   const app = Fastify({ logger: false });
   const websocketServer = new WebSocketServer({ noServer: true });
   const sockets = new Set<WebSocket>();
+  const { basePath } = options;
+  const basePathWithoutSlash = basePathWithoutTrailingSlash(basePath);
+  const uploadPath = pathAtBase(basePath, "__backend/upload");
+  const ipcPath = pathAtBase(basePath, "__backend/ipc");
+  const fileSystemPrefix = pathAtBase(basePath, "@fs/");
+  const webviewRoot = path.resolve(__dirname, "../../scratch/asar/webview");
+  const indexHtmlTemplate = await fs.readFile(
+    path.join(webviewRoot, "index.html"),
+    "utf8",
+  );
+  const escapedBasePath = basePath
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  const indexHtml = indexHtmlTemplate
+    .replace('<base href="/" />', `<base href="${escapedBasePath}" />`)
+    .replace(
+      '<link rel="manifest" href="/manifest.json" />',
+      `<link rel="manifest" href="${escapedBasePath}manifest.json" />`,
+    );
 
   await app.register(fastifyMultipart, {
     limits: {
@@ -389,7 +430,7 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     path.join(os.tmpdir(), "codex-web-uploads-"),
   );
 
-  app.post("/__backend/upload", async (request, reply) => {
+  app.post(uploadPath, async (request, reply) => {
     if (!request.isMultipart()) {
       return reply.code(400).send({ error: "expected multipart upload body" });
     }
@@ -417,26 +458,38 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
 
   await app.register(fastifyStatic, {
     root: "/",
-    prefix: "/@fs/",
+    prefix: fileSystemPrefix,
     decorateReply: false,
   });
 
   await app.register(fastifyStatic, {
-    root: path.resolve(__dirname, "../../scratch/asar/webview"),
-    prefix: "/",
+    root: webviewRoot,
+    prefix: basePath,
+    index: false,
   });
 
-  app.get("/", async (_request, reply) => {
-    return reply.sendFile("index.html");
+  if (basePath !== "/") {
+    app.get(basePathWithoutSlash, async (request, reply) => {
+      const queryIndex = request.url.indexOf("?");
+      const query = queryIndex === -1 ? "" : request.url.slice(queryIndex);
+      return reply.redirect(`${basePath}${query}`);
+    });
+  }
+
+  app.get(basePath, async (_request, reply) => {
+    return reply.type("text/html; charset=utf-8").send(indexHtml);
   });
 
   app.setNotFoundHandler((request, reply) => {
-    if (request.url.startsWith("/@fs/")) {
+    const host = request.headers.host ?? "localhost";
+    const requestPath = new URL(request.url, `http://${host}`).pathname;
+
+    if (requestPath.startsWith(fileSystemPrefix)) {
       return reply.code(404).send({ error: "Not Found" });
     }
 
-    if (request.method === "GET") {
-      return reply.sendFile("index.html");
+    if (request.method === "GET" && requestPath.startsWith(basePath)) {
+      return reply.type("text/html; charset=utf-8").send(indexHtml);
     }
     return reply.code(404).send({ error: "Not Found" });
   });
@@ -445,7 +498,7 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
     const requestUrl = request.url ?? "/";
     const host = request.headers.host ?? "localhost";
     const url = new URL(requestUrl, `http://${host}`);
-    if (url.pathname !== "/__backend/ipc") {
+    if (url.pathname !== ipcPath) {
       socket.destroy();
       return;
     }
@@ -618,7 +671,13 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
   });
 
   await app.listen({ host: options.host, port: options.port });
-  console.log(`IPC bridge listening at ws://${options.host}:${options.port}`);
+  console.log(
+    `IPC bridge listening at ws://${options.host}:${options.port}${ipcPath}`,
+  );
+
+  if (!startMainApp) {
+    return app;
+  }
 
   ensureElectronLikeProcessContext();
   installModuleAliasHook();
@@ -649,6 +708,8 @@ async function startIpcBridgeServer(options: ServerOptions): Promise<void> {
 
   const module = require(matches[0]!);
   module.runMainAppStartup();
+
+  return app;
 }
 
 async function main(args: string[]) {
@@ -657,4 +718,6 @@ async function main(args: string[]) {
   await startIpcBridgeServer(options);
 }
 
-main(process.argv.slice(2));
+if (require.main === module) {
+  void main(process.argv.slice(2));
+}

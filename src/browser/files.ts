@@ -88,7 +88,7 @@ async function uploadFiles(files: File[]) {
     return [];
   }
 
-  const uploadUrl = new URL("/__backend/upload", window.location.href);
+  const uploadUrl = new URL("__backend/upload", document.baseURI);
   const formData = new FormData();
 
   for (const file of files) {

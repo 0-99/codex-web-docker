@@ -1,5 +1,8 @@
 import {
+  dispatchNavigateToRoute,
+  getDocumentBasePath,
   mapBrowserPathToInitialRoute,
+  mapBrowserPathToRoute,
   mapMemoryPathToBrowserPath,
 } from "./routes";
 import {
@@ -239,9 +242,9 @@ function ensureSocket(): void {
     return;
   }
 
-  socket = new WebSocket(
-    `${window.location.protocol === "https:" ? "wss:" : "ws:"}//${window.location.host}/__backend/ipc`,
-  );
+  const socketUrl = new URL("__backend/ipc", document.baseURI);
+  socketUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  socket = new WebSocket(socketUrl);
   socket.addEventListener("open", () => {
     flushOutboundQueue();
   });
@@ -353,6 +356,13 @@ const mobileMediaQuery = matchMedia("(max-width: 768px)");
 const initialSidebarState = !mobileMediaQuery.matches;
 const electronShim = (window.__ELECTRON_SHIM__ ??= {});
 const buildFlavor: "prod" | "dev" | "agent" | string = "prod";
+const browserBasePath = getDocumentBasePath();
+
+window.addEventListener("popstate", () => {
+  dispatchNavigateToRoute(
+    mapBrowserPathToRoute(window.location.pathname, browserBasePath),
+  );
+});
 
 Object.assign(globalThis, {
   process: {
@@ -388,6 +398,7 @@ electronShim.overrideAdapter = {
 const initialRoute = mapBrowserPathToInitialRoute(
   window.location.pathname,
   window.location.search,
+  browserBasePath,
 );
 electronShim.initialRoute = initialRoute.memoryPath;
 
@@ -406,7 +417,7 @@ electronShim.onMemoryNavigationChanged = (navigation) => {
     electronShim.closeSidebar?.();
   }
 
-  const browserPath = mapMemoryPathToBrowserPath(path);
+  const browserPath = mapMemoryPathToBrowserPath(path, browserBasePath);
   if (browserPath == null) {
     return;
   }

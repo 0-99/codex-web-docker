@@ -10,6 +10,10 @@ a browser frontend for codex desktop, running on a machine you control.
 > Docker; it can also run natively on the Docker host or on another reachable
 > system. Any setup can be used if it provides a compatible `codex app-server`
 > over `ws://`, `wss://`, or a shared Unix socket.
+> The Docker frontend can optionally be hosted below a URL path such as
+> `/my/example/subdir/` by setting `CODEX_WEB_BASE_PATH`; `/` remains the
+> default. Static assets, navigation, uploads, and WebSockets use the configured
+> path automatically.
 > At the time of writing, `latest` corresponds to Codex CLI version `0.151.0`;
 > use `ghcr.io/icoretech/codex-docker:0.151.0` to pin this exact version.
 

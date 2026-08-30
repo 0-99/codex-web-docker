@@ -57,6 +57,28 @@ The image also accepts these optional limits:
 | `CODEX_APP_SERVER_MAX_PAYLOAD`          | `104857600` | Maximum WebSocket message size in bytes |
 | `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS` |     `10000` | Connection timeout in milliseconds      |
 
+## Hosting below a URL path
+
+By default, the web application is served at `/`. Set `CODEX_WEB_BASE_PATH` to
+host it below an arbitrary URL path without assigning a dedicated domain:
+
+```yaml
+environment:
+  CODEX_WEB_BASE_PATH: /my/example/subdir/
+```
+
+The example is then available at
+`https://example.org/my/example/subdir/`. The setting applies to the complete
+application, including static assets, browser navigation, uploads, the PWA
+manifest, and the IPC WebSocket.
+
+The value must be an absolute URL path. A missing trailing slash is normalized
+automatically, and `/` remains the default. Configure the reverse proxy to
+forward the prefix unchanged to `codex-web:8214`; do not strip or rewrite it.
+WebSocket upgrades must remain enabled. Direct access through the example's
+local port uses the same path, for example
+`http://127.0.0.1:8214/my/example/subdir/`.
+
 ## Compose and Portainer
 
 When the app-server runs in another container on the same Docker host, create
