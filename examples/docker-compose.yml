@@ -1,0 +1,40 @@
+# Example deployment for the CLI-free Codex Web frontend.
+# The Codex CLI and `codex app-server` must run in a separate container.
+
+services:
+  codex-web:
+    image: 0to99/codex-web-docker:latest
+    container_name: codex-web
+
+    # Adds a small PID 1 that forwards stop signals and reaps child processes.
+    init: true
+    restart: unless-stopped
+
+    environment:
+      # The hostname must resolve to the separate app-server container on the
+      # shared `codex` network. Change it if that container has another name.
+      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
+
+      # Optional connection limits and their defaults:
+      # CODEX_APP_SERVER_MAX_PAYLOAD: 104857600
+      # CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: 10000
+
+    ports:
+      # Bind only to the Docker host for local access. Remove this mapping when
+      # a reverse proxy reaches codex-web through a shared Docker network.
+      - "127.0.0.1:8214:8214"
+
+    volumes:
+      # The app-server container must mount the same workspace at /workspace so
+      # both containers refer to files using identical paths.
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+
+    networks:
+      - codex
+
+networks:
+  # Create once with `docker network create codex`, or as an external network
+  # in Portainer. The separate app-server container must join this network too.
+  codex:
+    name: codex
+    external: true

@@ -59,9 +59,10 @@ docker network create codex
 ```
 
 Then set `WORKSPACE_PATH` and, if needed, `CODEX_APP_SERVER_URL`, and deploy
-`compose.yml`. The app-server container must mount project directories at the
-same container paths as `codex-web`; otherwise the web file picker and Codex
-will refer to different files.
+[`examples/docker-compose.yml`](examples/docker-compose.yml). The app-server
+container must mount project directories at the same container paths as
+`codex-web`; otherwise the web file picker and Codex will refer to different
+files.
 
 The example publishes the UI only on `127.0.0.1:8214` for local testing. For
 Nginx Proxy Manager, attach `codex-web` and Nginx Proxy Manager to a dedicated
