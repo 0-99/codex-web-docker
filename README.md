@@ -5,9 +5,11 @@ a browser frontend for codex desktop, running on a machine you control.
 > This fork also provides a small, CLI-free multi-architecture Docker image
 > that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
 > [`ghcr.io/icoretech/codex-docker:latest`](https://github.com/icoretech/codex-docker)
-> is one possible companion image for the separate Codex CLI container, but it
-> is not a dependency. Any other image can be used if it provides a compatible
-> `codex app-server` over `ws://`, `wss://`, or a shared Unix socket.
+> is one possible companion image when running the Codex CLI in another
+> container, but it is not a dependency. The app-server does not have to run in
+> Docker; it can also run natively on the Docker host or on another reachable
+> system. Any setup can be used if it provides a compatible `codex app-server`
+> over `ws://`, `wss://`, or a shared Unix socket.
 > At the time of writing, `latest` corresponds to Codex CLI version `0.151.0`;
 > use `ghcr.io/icoretech/codex-docker:0.151.0` to pin this exact version.
 

@@ -1,5 +1,6 @@
 # Example deployment for the CLI-free Codex Web frontend.
-# The Codex CLI and `codex app-server` must run in a separate container.
+# The Codex CLI and `codex app-server` run separately from this service. They
+# may run in another container, natively on the host, or on a reachable system.
 # `ghcr.io/icoretech/codex-docker:latest` is one possible companion image, not
 # a required dependency. Any other image can be used if it provides a compatible
 # `codex app-server` over ws://, wss://, or a shared Unix socket.
@@ -16,8 +17,8 @@ services:
     restart: unless-stopped
 
     environment:
-      # The hostname must resolve to the separate app-server container on the
-      # shared `codex` network. Change it if that container has another name.
+      # The default assumes an app-server container named `codex-app-server` on
+      # the shared `codex` network. Set another reachable endpoint as needed.
       # Accepted transports are ws://, wss://, and unix:///absolute/socket/path.
       CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
 
@@ -31,16 +32,20 @@ services:
       - "127.0.0.1:8214:8214"
 
     volumes:
-      # The app-server container must mount the same workspace at /workspace so
-      # both containers refer to files using identical paths.
+      # The app-server must access this workspace at the identical absolute path
+      # /workspace, whether it runs in a container or natively on the host.
       - ${WORKSPACE_PATH:-./workspace}:/workspace
 
     networks:
       - codex
 
 networks:
-  # Create once with `docker network create codex`, or as an external network
-  # in Portainer. The separate app-server container must join this network too.
+  # Deliberately use a user-defined bridge network instead of host networking
+  # or Docker's shared default `bridge`. It provides isolation and DNS-based
+  # container-name resolution for the app-server connection.
+  # Create it once with `docker network create --driver bridge codex`, or as an
+  # external bridge network in Portainer. A containerized app-server must join
+  # this network too; a native or remote app-server only needs to be reachable.
   codex:
     name: codex
     external: true
