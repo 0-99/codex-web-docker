@@ -2,6 +2,9 @@
 
 a browser frontend for codex desktop, running on a machine you control.
 
+> This fork also provides a small, CLI-free multi-architecture Docker image
+> that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
+
 https://github.com/user-attachments/assets/0a33cbd8-741c-412c-9e75-46dfe9324596
 
 ## motivation
