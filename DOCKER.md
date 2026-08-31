@@ -50,12 +50,26 @@ volumes:
   - codex-app-server-socket:/run/codex
 ```
 
-The image also accepts these optional limits:
+The image also accepts these optional connection settings:
 
-| Variable                                |     Default | Purpose                                 |
-| --------------------------------------- | ----------: | --------------------------------------- |
-| `CODEX_APP_SERVER_MAX_PAYLOAD`          | `104857600` | Maximum WebSocket message size in bytes |
-| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS` |     `10000` | Connection timeout in milliseconds      |
+| Variable                                    | Default            | Purpose                                       |
+| ------------------------------------------- | ------------------ | --------------------------------------------- |
+| `CODEX_APP_SERVER_MAX_PAYLOAD`              | `104857600`        | Maximum WebSocket message size in bytes       |
+| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS`     | `10000`            | Connection timeout in milliseconds            |
+| `CODEX_APP_SERVER_RECONNECT_ATTEMPTS`       | `5`                | Reconnect attempts after a connection failure |
+| `CODEX_APP_SERVER_RECONNECT_DELAY_MS`       | `30000`            | Delay between reconnect attempts in ms        |
+| `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` | Action after all reconnect attempts fail      |
+
+The reconnect counter is reset after a connection succeeds. Set
+`CODEX_APP_SERVER_RECONNECT_ATTEMPTS` to `0` to disable reconnection. When all
+attempts are exhausted, `terminate-parent` stops the web server so that the
+container's restart policy can restart it. Set the failure action to `exit` to
+stop only the proxy process instead.
+
+The web server's initialization timeout is calculated from the configured
+connection timeout, reconnect attempts, and reconnect delay. This keeps the
+upstream initialization handshake open until the proxy has completed all
+configured attempts.
 
 ## Hosting below a URL path
 

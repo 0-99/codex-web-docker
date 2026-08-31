@@ -1,0 +1,25 @@
+--- a/.vite/build/src-Ct4P_yu5.js
++++ b/.vite/build/src-Ct4P_yu5.js
+@@ -36032,7 +36032,21 @@
+   pV = 1e3,
+   mV = 1e3,
+   hV = 2e3,
+-  gV = 3e4,
++  gV = (() => {
++    let e = Number.parseInt(
++        process.env.CODEX_APP_SERVER_RECONNECT_ATTEMPTS ?? `5`,
++        10,
++      ),
++      t = Number.parseInt(
++        process.env.CODEX_APP_SERVER_RECONNECT_DELAY_MS ?? `30000`,
++        10,
++      ),
++      n = Number.parseInt(
++        process.env.CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS ?? `10000`,
++        10,
++      );
++    return Math.max(3e4, (e + 1) * 2 * n + e * t + 5e3);
++  })(),
+   _V = 3e4,
+   vV = 9e4,
+   yV = `Codex app-server initialize handshake timed out`,
