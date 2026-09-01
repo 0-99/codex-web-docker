@@ -109,6 +109,18 @@ const reconnectDelay = positiveInteger(
   "CODEX_APP_SERVER_RECONNECT_DELAY_MS",
   30_000,
 );
+const maxBackoffReconnectAttempts = nonNegativeInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS",
+  10,
+);
+const backoffInitialDelay = positiveInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS",
+  5 * 60_000,
+);
+const backoffDelayIncrement = nonNegativeInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS",
+  5 * 60_000,
+);
 const reconnectFailureAction = configuredChoice(
   "CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION",
   "exit",
@@ -121,7 +133,8 @@ let inputEnded = false;
 let shuttingDown = false;
 let finished = false;
 let connectionReady = false;
-let reconnectAttempts = 0;
+let quickReconnectAttempts = 0;
+let backoffReconnectAttempts = 0;
 let reconnectTimeout = null;
 let socket = null;
 let startInitialize = null;
@@ -148,9 +161,26 @@ function scheduleReconnect(error) {
     `codex-app-server-proxy: app-server connection failed: ${error.message}\n`,
   );
 
-  if (reconnectAttempts >= maxReconnectAttempts) {
+  let delay;
+  let attemptDescription;
+  if (quickReconnectAttempts < maxReconnectAttempts) {
+    quickReconnectAttempts += 1;
+    delay = reconnectDelay;
+    attemptDescription = `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`;
+  } else if (backoffReconnectAttempts < maxBackoffReconnectAttempts) {
+    backoffReconnectAttempts += 1;
+    delay =
+      backoffInitialDelay +
+      (backoffReconnectAttempts - 1) * backoffDelayIncrement;
+    if (!Number.isSafeInteger(delay)) {
+      fail("configured reconnect backoff exceeds the supported integer range");
+    }
+    attemptDescription = `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`;
+  } else {
     process.stderr.write(
-      `codex-app-server-proxy: giving up after ${maxReconnectAttempts} reconnect attempts\n`,
+      "codex-app-server-proxy: giving up after " +
+        `${maxReconnectAttempts} quick and ` +
+        `${maxBackoffReconnectAttempts} backoff reconnect attempts\n`,
     );
     if (reconnectFailureAction === "terminate-parent") {
       process.stderr.write(
@@ -168,15 +198,14 @@ function scheduleReconnect(error) {
     return;
   }
 
-  reconnectAttempts += 1;
   process.stderr.write(
-    `codex-app-server-proxy: reconnecting in ${reconnectDelay} ms ` +
-      `(attempt ${reconnectAttempts}/${maxReconnectAttempts})\n`,
+    `codex-app-server-proxy: reconnecting in ${delay} ms ` +
+      `(${attemptDescription})\n`,
   );
   reconnectTimeout = setTimeout(() => {
     reconnectTimeout = null;
     connect();
-  }, reconnectDelay);
+  }, delay);
 }
 
 function send(message) {
@@ -315,7 +344,8 @@ function connect() {
         const wasAlreadyInitialized = initializedOnce;
         initializedOnce = true;
         connectionReady = true;
-        reconnectAttempts = 0;
+        quickReconnectAttempts = 0;
+        backoffReconnectAttempts = 0;
         if (!wasAlreadyInitialized) {
           process.stdout.write(`${message}\n`);
         }

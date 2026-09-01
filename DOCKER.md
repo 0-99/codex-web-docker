@@ -52,24 +52,29 @@ volumes:
 
 The image also accepts these optional connection settings:
 
-| Variable                                    | Default            | Purpose                                       |
-| ------------------------------------------- | ------------------ | --------------------------------------------- |
-| `CODEX_APP_SERVER_MAX_PAYLOAD`              | `104857600`        | Maximum WebSocket message size in bytes       |
-| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS`     | `10000`            | Connection timeout in milliseconds            |
-| `CODEX_APP_SERVER_RECONNECT_ATTEMPTS`       | `5`                | Reconnect attempts after a connection failure |
-| `CODEX_APP_SERVER_RECONNECT_DELAY_MS`       | `30000`            | Delay between reconnect attempts in ms        |
-| `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` | Action after all reconnect attempts fail      |
+| Variable                                              | Default            | Purpose                                             |
+| ----------------------------------------------------- | ------------------ | --------------------------------------------------- |
+| `CODEX_APP_SERVER_MAX_PAYLOAD`                        | `104857600`        | Maximum WebSocket message size in bytes             |
+| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS`               | `10000`            | Connection timeout in milliseconds                  |
+| `CODEX_APP_SERVER_RECONNECT_ATTEMPTS`                 | `5`                | Quick reconnect attempts after a connection failure |
+| `CODEX_APP_SERVER_RECONNECT_DELAY_MS`                 | `30000`            | Fixed delay between quick reconnect attempts in ms  |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS`         | `10`               | Long-term reconnect attempts after quick retries    |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS` | `300000`           | Delay before the first long-term reconnect attempt  |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS`     | `300000`           | Added delay before each further long-term attempt   |
+| `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION`           | `terminate-parent` | Action after all reconnect attempts fail            |
 
-The reconnect counter is reset after a connection succeeds. Set
-`CODEX_APP_SERVER_RECONNECT_ATTEMPTS` to `0` to disable reconnection. When all
-attempts are exhausted, `terminate-parent` stops the web server so that the
+Both reconnect counters are reset after a connection succeeds. With the
+defaults, the proxy first retries five times at 30-second intervals. It then
+makes ten long-term attempts after waits of 5, 10, 15, through 50 minutes. Set
+either attempt count to `0` to disable that phase. When all attempts are
+exhausted, `terminate-parent` stops the web server with an error so that the
 container's restart policy can restart it. Set the failure action to `exit` to
 stop only the proxy process instead.
 
 The web server's initialization timeout is calculated from the configured
-connection timeout, reconnect attempts, and reconnect delay. This keeps the
-upstream initialization handshake open until the proxy has completed all
-configured attempts.
+connection timeout and both reconnect phases. This keeps the upstream
+initialization handshake open until the proxy has completed all configured
+attempts.
 
 ## Hosting below a URL path
 

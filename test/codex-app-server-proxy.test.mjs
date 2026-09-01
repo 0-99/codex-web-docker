@@ -144,7 +144,7 @@ test("reconnects after the app-server becomes available", async (t) => {
   child.stdin.write(
     `${JSON.stringify({ id: "init", method: "initialize" })}\n`,
   );
-  await stderr.waitFor(/attempt 1\/5/);
+  await stderr.waitFor(/quick attempt 1\/5/);
 
   const server = new WebSocketServer({ host: "127.0.0.1", port });
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -190,7 +190,7 @@ test("reinitializes after an established connection is lost", async (t) => {
 
   assert.equal(connections.size, 1);
   connections.values().next().value.terminate();
-  await stderr.waitFor(/attempt 1\/5/);
+  await stderr.waitFor(/quick attempt 1\/5/);
 
   const response = once(output, "line");
   const request = JSON.stringify({ id: 3, method: "thread/list" });
@@ -207,13 +207,49 @@ test("exits after the configured reconnect attempts are exhausted", async (t) =>
     CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
     CODEX_APP_SERVER_RECONNECT_ATTEMPTS: "2",
     CODEX_APP_SERVER_RECONNECT_DELAY_MS: "10",
+    CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS: "0",
   });
   const stderr = capture(child.stderr);
 
   assert.equal((await once(child, "exit"))[0], 1);
-  assert.match(stderr.output(), /attempt 1\/2/);
-  assert.match(stderr.output(), /attempt 2\/2/);
-  assert.match(stderr.output(), /giving up after 2 reconnect attempts/);
+  assert.match(stderr.output(), /quick attempt 1\/2/);
+  assert.match(stderr.output(), /quick attempt 2\/2/);
+  assert.match(
+    stderr.output(),
+    /giving up after 2 quick and 0 backoff reconnect attempts/,
+  );
+});
+
+test("uses an increasing delay for long-term reconnect attempts", async (t) => {
+  const port = await unusedPort();
+  const child = spawnProxy(t, `ws://127.0.0.1:${port}`, {
+    CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
+    CODEX_APP_SERVER_RECONNECT_ATTEMPTS: "1",
+    CODEX_APP_SERVER_RECONNECT_DELAY_MS: "10",
+    CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS: "3",
+    CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS: "20",
+    CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS: "10",
+  });
+  const stderr = capture(child.stderr);
+
+  assert.equal((await once(child, "exit"))[0], 1);
+  assert.match(stderr.output(), /reconnecting in 10 ms \(quick attempt 1\/1\)/);
+  assert.match(
+    stderr.output(),
+    /reconnecting in 20 ms \(backoff attempt 1\/3\)/,
+  );
+  assert.match(
+    stderr.output(),
+    /reconnecting in 30 ms \(backoff attempt 2\/3\)/,
+  );
+  assert.match(
+    stderr.output(),
+    /reconnecting in 40 ms \(backoff attempt 3\/3\)/,
+  );
+  assert.match(
+    stderr.output(),
+    /giving up after 1 quick and 3 backoff reconnect attempts/,
+  );
 });
 
 test("can terminate its parent after reconnect attempts are exhausted", async (t) => {
@@ -239,6 +275,7 @@ test("can terminate its parent after reconnect attempts are exhausted", async (t
         CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
         CODEX_APP_SERVER_RECONNECT_ATTEMPTS: "0",
         CODEX_APP_SERVER_RECONNECT_DELAY_MS: "10",
+        CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS: "0",
         CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION: "terminate-parent",
       },
       stdio: "ignore",

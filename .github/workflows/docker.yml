@@ -35,10 +35,10 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build local smoke-test image
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./Dockerfile
@@ -81,6 +81,33 @@ jobs:
           docker logs "$container_name"
           exit 1
 
+      - name: Verify exhausted retries stop the container with an error
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name=codex-web-retry-exhaustion-smoke
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container_name" \
+            --env CODEX_APP_SERVER_URL=ws://127.0.0.1:9 \
+            --env CODEX_APP_SERVER_RECONNECT_ATTEMPTS=0 \
+            --env CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS=0 \
+            codex-web-docker:smoke
+
+          if ! exit_code="$(timeout 30s docker wait "$container_name")"; then
+            docker logs "$container_name"
+            exit 1
+          fi
+          if [[ "$exit_code" == "0" ]]; then
+            docker logs "$container_name"
+            echo "Container unexpectedly exited successfully" >&2
+            exit 1
+          fi
+
   push_to_registry:
     name: Push Docker image to Docker Hub
     needs: smoke_test
@@ -96,26 +123,26 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@f4ef78c080cd8ba55a85445d5b36e214a81df20a
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
 
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@9ec57ed1fcdbf14dcef7dfbe97b2010124a938b7
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.DOCKER_IMAGE }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
       - name: Build and push Docker image
         id: push
-        uses: docker/build-push-action@3b5e8027fcad23fda98b2e3ac259d8d67585f671
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           file: ./Dockerfile

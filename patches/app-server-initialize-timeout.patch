@@ -1,6 +1,6 @@
 --- a/.vite/build/src-Ct4P_yu5.js
 +++ b/.vite/build/src-Ct4P_yu5.js
-@@ -36032,7 +36032,21 @@
+@@ -36032,7 +36032,38 @@
    pV = 1e3,
    mV = 1e3,
    hV = 2e3,
@@ -17,8 +17,25 @@
 +      n = Number.parseInt(
 +        process.env.CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS ?? `10000`,
 +        10,
++      ),
++      r = Number.parseInt(
++        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS ?? `10`,
++        10,
++      ),
++      a = Number.parseInt(
++        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS ??
++          `300000`,
++        10,
++      ),
++      o = Number.parseInt(
++        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS ??
++          `300000`,
++        10,
 +      );
-+    return Math.max(3e4, (e + 1) * 2 * n + e * t + 5e3);
++    return Math.max(
++      3e4,
++      (e + r + 1) * 2 * n + e * t + r * a + (r * (r - 1) * o) / 2 + 5e3,
++    );
 +  })(),
    _V = 3e4,
    vV = 9e4,
