@@ -22,6 +22,7 @@ COPY . .
 
 RUN npm ci --ignore-scripts --no-audit --no-fund \
     && npm rebuild sharp \
+    && npm run test:docker-proxy \
     && npm run prepare \
     && find scratch/asar -type f -name '*.map' -delete \
     && find src/server -type f ! -name '*.js' -delete \
@@ -63,6 +64,7 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8214 \
     CODEX_WEB_BASE_PATH=/ \
+    CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION=terminate-parent \
     CODEX_CLI_PATH=/opt/codex-web/docker/codex-app-server-proxy.mjs
 
 LABEL org.opencontainers.image.source="https://github.com/0-99/codex-web-docker" \

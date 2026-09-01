@@ -5,4 +5,5 @@ node_modules
 scratch*
 npm-debug.log*
 compose*.yml
-test
+test/*
+!test/codex-app-server-proxy.test.mjs

@@ -23,6 +23,27 @@ function positiveInteger(name, fallback) {
   return value;
 }
 
+function nonNegativeInteger(name, fallback) {
+  const rawValue = process.env[name]?.trim();
+  if (!rawValue) {
+    return fallback;
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isSafeInteger(value) || value < 0) {
+    fail(`${name} must be a non-negative integer`);
+  }
+  return value;
+}
+
+function configuredChoice(name, fallback, choices) {
+  const value = process.env[name]?.trim() || fallback;
+  if (!choices.includes(value)) {
+    fail(`${name} must be one of: ${choices.join(", ")}`);
+  }
+  return value;
+}
+
 function parseInvocation(argv) {
   const args = [...argv];
   while (args[0] === "-c") {
@@ -80,30 +101,141 @@ const handshakeTimeout = positiveInteger(
   "CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS",
   10_000,
 );
+const maxReconnectAttempts = nonNegativeInteger(
+  "CODEX_APP_SERVER_RECONNECT_ATTEMPTS",
+  5,
+);
+const reconnectDelay = positiveInteger(
+  "CODEX_APP_SERVER_RECONNECT_DELAY_MS",
+  30_000,
+);
+const maxBackoffReconnectAttempts = nonNegativeInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS",
+  10,
+);
+const backoffInitialDelay = positiveInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS",
+  5 * 60_000,
+);
+const backoffDelayIncrement = nonNegativeInteger(
+  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS",
+  5 * 60_000,
+);
+const reconnectFailureAction = configuredChoice(
+  "CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION",
+  "exit",
+  ["exit", "terminate-parent"],
+);
 const pendingMessages = [];
+let initializeRequest = null;
+let initializedOnce = false;
 let inputEnded = false;
-let opened = false;
-let failed = false;
+let shuttingDown = false;
+let finished = false;
+let connectionReady = false;
+let quickReconnectAttempts = 0;
+let backoffReconnectAttempts = 0;
+let reconnectTimeout = null;
+let socket = null;
+let startInitialize = null;
 
-const socket = new WebSocket(connection.url, {
-  ...connection.options,
-  handshakeTimeout,
-  maxPayload,
-  perMessageDeflate: false,
-});
+function formatDuration(milliseconds) {
+  if (milliseconds % 60_000 === 0) {
+    const minutes = milliseconds / 60_000;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  if (milliseconds % 1_000 === 0) {
+    const seconds = milliseconds / 1_000;
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  }
+  return `${milliseconds} ms`;
+}
 
-function reportConnectionFailure(error) {
-  if (failed) {
+function finish(exitCode) {
+  if (finished) {
     return;
   }
-  failed = true;
+  finished = true;
+  if (reconnectTimeout !== null) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  process.exitCode = exitCode;
+  input.close();
+}
+
+function scheduleReconnect(error) {
+  if (inputEnded || shuttingDown || finished) {
+    return;
+  }
+
   process.stderr.write(
     `codex-app-server-proxy: app-server connection failed: ${error.message}\n`,
   );
+
+  let delay;
+  let attemptDescription;
+  if (quickReconnectAttempts < maxReconnectAttempts) {
+    quickReconnectAttempts += 1;
+    delay = reconnectDelay;
+    attemptDescription = `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`;
+  } else if (backoffReconnectAttempts < maxBackoffReconnectAttempts) {
+    backoffReconnectAttempts += 1;
+    delay =
+      backoffInitialDelay +
+      (backoffReconnectAttempts - 1) * backoffDelayIncrement;
+    if (!Number.isSafeInteger(delay)) {
+      fail("configured reconnect backoff exceeds the supported integer range");
+    }
+    attemptDescription = `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`;
+  } else {
+    process.stderr.write(
+      "codex-app-server-proxy: giving up after " +
+        `${maxReconnectAttempts} quick and ` +
+        `${maxBackoffReconnectAttempts} backoff reconnect attempts\n`,
+    );
+    if (reconnectFailureAction === "terminate-parent") {
+      process.stderr.write(
+        `codex-app-server-proxy: terminating parent process ${process.ppid}\n`,
+      );
+      try {
+        process.kill(process.ppid, "SIGTERM");
+      } catch (error) {
+        process.stderr.write(
+          `codex-app-server-proxy: failed to terminate parent process: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      }
+    }
+    finish(1);
+    return;
+  }
+
+  process.stderr.write(
+    `codex-app-server-proxy: reconnecting in ${formatDuration(delay)} ` +
+      `(${attemptDescription})\n`,
+  );
+  reconnectTimeout = setTimeout(() => {
+    reconnectTimeout = null;
+    connect();
+  }, delay);
 }
 
 function send(message) {
-  if (socket.readyState === WebSocket.OPEN) {
+  let parsedMessage;
+  try {
+    parsedMessage = JSON.parse(message);
+  } catch {}
+
+  if (
+    parsedMessage?.method === "initialize" &&
+    Object.hasOwn(parsedMessage, "id")
+  ) {
+    initializeRequest = { id: parsedMessage.id, message };
+    startInitialize?.();
+    return;
+  }
+
+  if (connectionReady && socket?.readyState === WebSocket.OPEN) {
     socket.send(message);
   } else {
     pendingMessages.push(message);
@@ -124,52 +256,164 @@ input.on("line", (line) => {
 
 input.on("close", () => {
   inputEnded = true;
-  if (socket.readyState === WebSocket.OPEN) {
+  if (reconnectTimeout !== null) {
+    clearTimeout(reconnectTimeout);
+    reconnectTimeout = null;
+  }
+  if (socket?.readyState === WebSocket.OPEN) {
     socket.close(1000, "stdin closed");
-  } else if (socket.readyState === WebSocket.CONNECTING) {
+  } else if (socket?.readyState === WebSocket.CONNECTING) {
     socket.terminate();
   }
 });
 
-socket.on("open", () => {
-  opened = true;
-  for (const message of pendingMessages.splice(0)) {
-    socket.send(message);
-  }
-  if (inputEnded) {
-    socket.close(1000, "stdin closed");
-  }
-});
-
-socket.on("message", (data, isBinary) => {
-  if (isBinary) {
-    reportConnectionFailure(new Error("received an unexpected binary frame"));
-    socket.close(1003, "text frames required");
+function connect() {
+  if (inputEnded || shuttingDown || finished) {
     return;
   }
-  process.stdout.write(`${data.toString()}\n`);
-});
 
-socket.on("error", reportConnectionFailure);
+  const currentSocket = new WebSocket(connection.url, {
+    ...connection.options,
+    handshakeTimeout,
+    maxPayload,
+    perMessageDeflate: false,
+  });
+  socket = currentSocket;
+  connectionReady = false;
+  let connectionError = null;
+  let awaitingInitializeResponse = false;
+  let initializeResponseTimeout = null;
 
-socket.on("close", (code, reason) => {
-  if (!failed && !inputEnded && code !== 1000) {
-    reportConnectionFailure(
-      new Error(
-        `connection closed with code ${code}${reason.length ? ` (${reason.toString()})` : ""}`,
-      ),
-    );
+  function clearInitializeResponseTimeout() {
+    if (initializeResponseTimeout !== null) {
+      clearTimeout(initializeResponseTimeout);
+      initializeResponseTimeout = null;
+    }
   }
-  process.exitCode = failed || (!opened && !inputEnded) ? 1 : 0;
-});
+
+  function flushPendingMessages() {
+    for (const message of pendingMessages.splice(0)) {
+      currentSocket.send(message);
+    }
+  }
+
+  function initializeConnection() {
+    if (
+      currentSocket.readyState !== WebSocket.OPEN ||
+      awaitingInitializeResponse ||
+      initializeRequest === null
+    ) {
+      return;
+    }
+
+    connectionReady = false;
+    awaitingInitializeResponse = true;
+    currentSocket.send(initializeRequest.message);
+    initializeResponseTimeout = setTimeout(() => {
+      connectionError = new Error("app-server initialize response timed out");
+      currentSocket.terminate();
+    }, handshakeTimeout);
+  }
+
+  startInitialize = initializeConnection;
+
+  currentSocket.on("open", () => {
+    initializeConnection();
+    if (inputEnded) {
+      currentSocket.close(1000, "stdin closed");
+    }
+  });
+
+  currentSocket.on("message", (data, isBinary) => {
+    if (isBinary) {
+      connectionError = new Error("received an unexpected binary frame");
+      currentSocket.close(1003, "text frames required");
+      return;
+    }
+
+    const message = data.toString();
+    if (awaitingInitializeResponse && initializeRequest !== null) {
+      let parsedMessage;
+      try {
+        parsedMessage = JSON.parse(message);
+      } catch {}
+
+      if (
+        parsedMessage?.id === initializeRequest.id &&
+        (Object.hasOwn(parsedMessage, "result") ||
+          Object.hasOwn(parsedMessage, "error"))
+      ) {
+        clearInitializeResponseTimeout();
+        awaitingInitializeResponse = false;
+        if (parsedMessage.error) {
+          connectionError = new Error(
+            parsedMessage.error.message ?? "app-server initialize failed",
+          );
+          currentSocket.close(1011, "app-server initialize failed");
+          return;
+        }
+
+        const wasAlreadyInitialized = initializedOnce;
+        const successfulAttempt =
+          backoffReconnectAttempts > 0
+            ? `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`
+            : quickReconnectAttempts > 0
+              ? `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`
+              : null;
+        initializedOnce = true;
+        connectionReady = true;
+        quickReconnectAttempts = 0;
+        backoffReconnectAttempts = 0;
+        process.stderr.write(
+          "codex-app-server-proxy: app-server connection " +
+            `${wasAlreadyInitialized ? "restored" : "established"}` +
+            `${successfulAttempt === null ? "" : ` after ${successfulAttempt}`}\n`,
+        );
+        if (!wasAlreadyInitialized) {
+          process.stdout.write(`${message}\n`);
+        }
+        flushPendingMessages();
+        return;
+      }
+    }
+
+    process.stdout.write(`${message}\n`);
+  });
+
+  currentSocket.on("error", (error) => {
+    connectionError = error;
+  });
+
+  currentSocket.on("close", (code, reason) => {
+    clearInitializeResponseTimeout();
+    if (socket === currentSocket) {
+      socket = null;
+      connectionReady = false;
+      startInitialize = null;
+    }
+    if (inputEnded || shuttingDown || finished) {
+      return;
+    }
+
+    scheduleReconnect(
+      connectionError ??
+        new Error(
+          `connection closed with code ${code}${reason.length ? ` (${reason.toString()})` : ""}`,
+        ),
+    );
+  });
+}
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
+    shuttingDown = true;
     input.close();
-    if (socket.readyState === WebSocket.OPEN) {
+    if (socket?.readyState === WebSocket.OPEN) {
       socket.close(1001, signal);
-    } else {
+    } else if (socket?.readyState === WebSocket.CONNECTING) {
       socket.terminate();
     }
   });
 }
+
+connect();

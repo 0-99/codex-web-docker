@@ -1,0 +1,112 @@
+# https://docs.docker.com/build/ci/github-actions/multi-platform/
+
+name: Smoke-test every supported platform
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  smoke_test:
+    name: Build and smoke-test Docker image (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag_suffix: amd64
+          - platform: linux/arm64
+            tag_suffix: arm64
+          - platform: linux/ppc64le
+            tag_suffix: ppc64le
+          - platform: linux/s390x
+            tag_suffix: s390x
+          - platform: linux/arm/v7
+            tag_suffix: arm-v7
+
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v5
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Build local smoke-test image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          platforms: ${{ matrix.platform }}
+          push: false
+          tags: codex-web-docker:smoke-${{ matrix.tag_suffix }}
+          build-args: |
+            SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=smoke-${{ matrix.tag_suffix }}
+          cache-to: type=gha,mode=max,scope=smoke-${{ matrix.tag_suffix }}
+
+      - name: Verify container startup and HTTP endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name=codex-web-smoke
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container_name" \
+            --env CODEX_APP_SERVER_URL=ws://127.0.0.1:9 \
+            --publish 127.0.0.1:8214:8214 \
+            codex-web-docker:smoke-${{ matrix.tag_suffix }}
+
+          for attempt in {1..60}; do
+            if curl --fail --silent --show-error http://127.0.0.1:8214/ >/dev/null; then
+              exit 0
+            fi
+            if [[ "$(docker inspect --format '{{.State.Running}}' "$container_name")" != "true" ]]; then
+              docker logs "$container_name"
+              exit 1
+            fi
+            sleep 1
+          done
+
+          docker logs "$container_name"
+          exit 1
+
+      - name: Verify exhausted retries stop the container with an error
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_name=codex-web-retry-exhaustion-smoke
+          cleanup() {
+            docker rm --force "$container_name" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT
+
+          docker run --detach \
+            --name "$container_name" \
+            --env CODEX_APP_SERVER_URL=ws://127.0.0.1:9 \
+            --env CODEX_APP_SERVER_RECONNECT_ATTEMPTS=0 \
+            --env CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS=0 \
+            codex-web-docker:smoke-${{ matrix.tag_suffix }}
+
+          if ! exit_code="$(timeout 60s docker wait "$container_name")"; then
+            docker logs "$container_name"
+            exit 1
+          fi
+          if [[ "$exit_code" == "0" ]]; then
+            docker logs "$container_name"
+            echo "Container unexpectedly exited successfully" >&2
+            exit 1
+          fi
