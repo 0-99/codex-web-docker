@@ -139,6 +139,18 @@ let reconnectTimeout = null;
 let socket = null;
 let startInitialize = null;
 
+function formatDuration(milliseconds) {
+  if (milliseconds % 60_000 === 0) {
+    const minutes = milliseconds / 60_000;
+    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
+  }
+  if (milliseconds % 1_000 === 0) {
+    const seconds = milliseconds / 1_000;
+    return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
+  }
+  return `${milliseconds} ms`;
+}
+
 function finish(exitCode) {
   if (finished) {
     return;
@@ -199,7 +211,7 @@ function scheduleReconnect(error) {
   }
 
   process.stderr.write(
-    `codex-app-server-proxy: reconnecting in ${delay} ms ` +
+    `codex-app-server-proxy: reconnecting in ${formatDuration(delay)} ` +
       `(${attemptDescription})\n`,
   );
   reconnectTimeout = setTimeout(() => {
@@ -342,10 +354,21 @@ function connect() {
         }
 
         const wasAlreadyInitialized = initializedOnce;
+        const successfulAttempt =
+          backoffReconnectAttempts > 0
+            ? `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`
+            : quickReconnectAttempts > 0
+              ? `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`
+              : null;
         initializedOnce = true;
         connectionReady = true;
         quickReconnectAttempts = 0;
         backoffReconnectAttempts = 0;
+        process.stderr.write(
+          "codex-app-server-proxy: app-server connection " +
+            `${wasAlreadyInitialized ? "restored" : "established"}` +
+            `${successfulAttempt === null ? "" : ` after ${successfulAttempt}`}\n`,
+        );
         if (!wasAlreadyInitialized) {
           process.stdout.write(`${message}\n`);
         }

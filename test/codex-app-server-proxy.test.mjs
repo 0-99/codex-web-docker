@@ -155,6 +155,10 @@ test("reconnects after the app-server becomes available", async (t) => {
     id: "init",
     result: {},
   });
+  assert.match(
+    stderr.output(),
+    /app-server connection established after quick attempt 1\/5/,
+  );
   const response = once(output, "line");
   const request = JSON.stringify({ id: 2, method: "thread/list" });
   child.stdin.write(`${request}\n`);
@@ -196,6 +200,10 @@ test("reinitializes after an established connection is lost", async (t) => {
   const request = JSON.stringify({ id: 3, method: "thread/list" });
   child.stdin.write(`${request}\n`);
   assert.equal((await response)[0], request);
+  assert.match(
+    stderr.output(),
+    /app-server connection restored after quick attempt 1\/5/,
+  );
 
   child.stdin.end();
   assert.equal((await once(child, "exit"))[0], 0);

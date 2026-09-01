@@ -76,6 +76,11 @@ connection timeout and both reconnect phases. This keeps the upstream
 initialization handshake open until the proxy has completed all configured
 attempts.
 
+Connection failures, scheduled attempts, successful reconnections, and final
+retry exhaustion are written to the container log. They can be viewed with
+`docker logs`, `docker compose logs`, or the container's **Logs** view in
+Portainer. Default delays are displayed as human-readable seconds or minutes.
+
 ## Hosting below a URL path
 
 By default, the web application is served at `/`. Set `CODEX_WEB_BASE_PATH` to
