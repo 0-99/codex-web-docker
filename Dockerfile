@@ -24,6 +24,7 @@ RUN npm ci --ignore-scripts --no-audit --no-fund \
     && npm rebuild sharp \
     && npm run test:docker-proxy \
     && npm run prepare \
+    && npm test \
     && find scratch/asar -type f -name '*.map' -delete \
     && find src/server -type f ! -name '*.js' -delete \
     && rm -rf scratch/asar/node_modules \
@@ -55,7 +56,9 @@ FROM alpine:${ALPINE_VERSION} AS runtime
 
 RUN apk add --no-cache nodejs \
     && addgroup -g 1000 node \
-    && adduser -D -u 1000 -G node node
+    && adduser -D -u 1000 -G node node \
+    && mkdir -p /home/node/.codex \
+    && chown node:node /home/node/.codex
 
 ARG SOURCE_REVISION=unknown
 
@@ -80,7 +83,7 @@ COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/package.json .
 COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/.vite/build ./scratch/asar/.vite/build
 COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/native-menu-locales ./scratch/asar/native-menu-locales
 COPY --from=builder --chown=node:node /opt/codex-web/scratch/asar/webview ./scratch/asar/webview
-COPY --from=builder --chown=node:node --chmod=0555 /opt/codex-web/docker/codex-app-server-proxy.mjs ./docker/codex-app-server-proxy.mjs
+COPY --from=builder --chown=node:node --chmod=0555 /opt/codex-web/docker ./docker
 
 USER node
 

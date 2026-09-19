@@ -9,6 +9,21 @@ on:
   workflow_call:
 
 jobs:
+  browser_runtime:
+    name: Test browser status and mobile layout
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser-runtime
+
   smoke_test:
     name: Build and smoke-test Docker image (${{ matrix.platform }})
     runs-on: ubuntu-latest
@@ -110,3 +125,17 @@ jobs:
             echo "Container unexpectedly exited successfully" >&2
             exit 1
           fi
+
+      - name: Verify fresh Codex-home volume ownership and persistence
+        shell: bash
+        run: |
+          set -euo pipefail
+          volume_name=codex-web-home-smoke-${{ matrix.tag_suffix }}
+          trap 'docker volume rm "$volume_name" >/dev/null 2>&1 || true' EXIT
+          docker volume create "$volume_name" >/dev/null
+          docker run --rm --volume "$volume_name:/home/node/.codex" \
+            --entrypoint node codex-web-docker:smoke-${{ matrix.tag_suffix }} \
+            -e 'const fs=require("node:fs"); if(process.getuid()!==1000) process.exit(1); fs.writeFileSync("/home/node/.codex/volume-smoke", "persisted");'
+          docker run --rm --volume "$volume_name:/home/node/.codex" \
+            --entrypoint node codex-web-docker:smoke-${{ matrix.tag_suffix }} \
+            -e 'const fs=require("node:fs"); if(fs.readFileSync("/home/node/.codex/volume-smoke", "utf8")!=="persisted") process.exit(1);'

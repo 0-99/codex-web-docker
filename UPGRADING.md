@@ -97,3 +97,47 @@ as loading taking forever (more than 1m). look out for that case too.
 
 if there are errors, bring them to the users attention and we will decide how to
 proceed.
+
+## Maintaining this Docker/web fork
+
+Before merging `0xcaff/codex-web`, start from an up-to-date fork `main` on a
+separate branch. Review the extension-boundary table in `ARCHITECTURE.md` and
+preserve `docker/`, `examples/` and `DOCKER.md` as fork-owned files. Keep edits to
+upstream source files limited to their integration points. Do not include an
+unrelated Codex Desktop/CLI version upgrade in a feature change.
+
+For the external app-server integration, verify these invariants after a merge:
+
+1. `main.ts` still installs `installWebRuntime` and serves injected assets at the
+   configured base path, including direct links to nested routes.
+2. Browser IPC advertises `navigator.languages`; dispatch runs within the locale
+   context and the Electron locale methods use it. Upstream's explicit
+   `localeOverride` must remain authoritative.
+3. Regenerate `app-server-initialize-timeout.patch` using `diff` against the
+   prettified original. Its guard only applies to the external local stdio
+   proxy; do not disable upstream native/remote-control timeouts globally.
+4. Check the pinned app-server protocol for `initialize` + `initialized`,
+   `thread/resume` parameters and thread lifecycle notifications. Preserve
+   session configuration without replaying start/fork/history payloads.
+5. Inspect the real Desktop root/chat layout when changing viewport-related
+   selectors. The browser regression fixture checks viewport behavior, but a
+   real Android/iOS keyboard remains a useful deployment smoke check.
+
+Validation (after preparing the extracted application):
+
+```sh
+npm test
+npm run build:browser
+npx playwright install chromium
+npm run test:browser-runtime
+```
+
+`npm test` covers proxy recovery, retry configuration, locale isolation, status
+transport/SSE and existing base-path behavior. Browser tests cover visible
+countdowns, recovery, draft preservation and mobile/desktop viewport sizing in
+a small chat-layout fixture. Docker CI additionally builds every supported
+architecture, checks initialization with an unavailable app-server, verifies
+finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
+
+Do not publish a release as part of validation. Submit the branch as a pull
+request and review its checks before merging or creating a release separately.

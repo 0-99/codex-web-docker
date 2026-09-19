@@ -64,3 +64,36 @@ important bits related to wiring up the ipc bridge.
 
 [preload script]: https://www.electronjs.org/docs/latest/tutorial/tutorial-preload
 [`ipcRenderer`]: https://www.electronjs.org/docs/latest/api/ipc-renderer
+
+## Docker/web fork extension boundary
+
+The Docker fork keeps connection policy and browser adaptations outside the
+extracted Desktop application. Do not fold these modules into Desktop bundles.
+
+| Location | Responsibility |
+| --- | --- |
+| `docker/codex-app-server-proxy.mjs` | JSONL/WebSocket bridge, connection generations, outstanding requests and thread recovery |
+| `docker/retry-policy.mjs` | New retry schedule and deprecated environment compatibility |
+| `docker/proxy-status.mjs` | Private status reporting; stdout stays exclusively app-server RPC |
+| `src/server/web-runtime.ts` | Status aggregation, JSON/SSE endpoints and injection of fork-owned browser assets |
+| `docker/browser/runtime.js` / `runtime.css` | Startup/reconnect panel, countdown and mobile visual viewport sizing |
+| `src/server/electron/locale.ts` | Request-scoped browser locale and system fallback |
+| `patches/app-server-initialize-timeout.patch` | Small local-stdio guard: the external proxy owns its initialization deadline |
+
+`main.ts` installs the extension and wraps IPC dispatch with a browser-language
+context. The Electron shim reads that context without overwriting settings;
+Desktop still resolves `localeOverride`. No new webview patch is needed for
+status or mobile layout. The timeout patch is the only modified extracted-code
+patch for this feature set.
+
+Each proxy reports states over an authenticated loopback TCP connection created
+by the backend. Its ephemeral port and random token are inherited through
+`CODEX_WEB_STATUS_ADDRESS`, never included in the public status snapshot.
+Status clients receive only phases, counts and timing, not RPC payloads or
+thread contents. Backend availability and app-server readiness remain distinct.
+
+Recovery initializes each new transport, resumes active threads, and only then
+releases queued requests. Already-sent requests are failed rather than replayed;
+server-request responses from an old transport are discarded. A failed resume
+isolates that thread instead of blocking healthy threads. The associated tests
+use independently restarted mock WebSocket servers and check ordering.
