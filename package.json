@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "files": [
     "README.md",
+    "docker/**/*",
     "scratch/asar/**/*",
     "src/server/**/*.js",
     "src/server/electron/index.js",
@@ -22,7 +23,9 @@
     "server": "CODEX_CLI_PATH=$(which codex) node src/server/main.js",
     "test:base-path": "node --experimental-strip-types --test test/base-path.test.mjs",
     "test:base-path-server": "npm run build:server && node --test test/base-path-server.test.mjs",
-    "test:docker-proxy": "node --test test/codex-app-server-proxy.test.mjs"
+    "test:docker-proxy": "node --test test/codex-app-server-proxy.test.mjs test/proxy-recovery.test.mjs test/retry-policy.test.mjs",
+    "test": "npm run build:server && node --experimental-strip-types --test test/*.test.mjs",
+    "test:browser-runtime": "npm run build:server && node --test test/browser/*.mjs"
   },
   "repository": "https://github.com/0-99/codex-web-docker.git",
   "author": "martin <martincharles07@gmail.com>",
@@ -44,6 +47,7 @@
     "@types/ws": "^8.18.1",
     "electron": "41.2.0",
     "http-server": "^14.1.1",
+    "playwright": "1.63.0",
     "prettier": "^3.8.2",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",

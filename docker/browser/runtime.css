@@ -1,0 +1,72 @@
+/* This stylesheet is injected by our server after the upstream styles. */
+@media (max-width: 768px) {
+  html,
+  body,
+  #root {
+    height: var(--codex-web-viewport-height, 100dvh) !important;
+    min-height: 0 !important;
+  }
+  body {
+    overflow: hidden;
+  }
+  #root {
+    box-sizing: border-box;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  #root > *,
+  .main-surface {
+    min-height: 0;
+  }
+}
+#codex-web-status {
+  position: fixed;
+  z-index: 2147483000;
+  top: max(12px, env(safe-area-inset-top, 0px));
+  right: 12px;
+  width: max-content;
+  max-width: min(440px, calc(100vw - 24px));
+  max-height: calc(var(--codex-web-viewport-height, 100dvh) - 32px);
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 12px 16px;
+  border: 1px solid #a0a0a066;
+  border-radius: 12px;
+  background: #f8f8f8;
+  color: #252525;
+  box-shadow: 0 3px 16px #0002;
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+  -webkit-app-region: no-drag;
+}
+#codex-web-status[hidden] {
+  display: none;
+}
+#codex-web-status[data-starting="true"] {
+  top: min(
+    calc(50% + 64px),
+    calc(var(--codex-web-viewport-height, 100dvh) - 220px)
+  );
+  left: 50%;
+  right: auto;
+  transform: translateX(-50%);
+}
+#codex-web-status [role="status"] {
+  font-weight: 600;
+}
+#codex-web-status summary {
+  margin-top: 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+#codex-web-status ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 12px;
+}
+@media (prefers-color-scheme: dark) {
+  #codex-web-status {
+    background: #242424;
+    color: #eee;
+  }
+}

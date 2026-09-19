@@ -22,6 +22,8 @@ import {
   pathAtBase,
 } from "./base-path";
 import { glob } from "glob";
+import { installWebRuntime } from "./web-runtime";
+import { normalizeLanguages, withBrowserLanguages } from "./electron/locale";
 
 export type ServerOptions = {
   basePath: string;
@@ -413,12 +415,14 @@ export async function startIpcBridgeServer(
     .replaceAll('"', "&quot;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
-  const indexHtml = indexHtmlTemplate
+  let indexHtml = indexHtmlTemplate
     .replace('<base href="/" />', `<base href="${escapedBasePath}" />`)
     .replace(
       '<link rel="manifest" href="/manifest.json" />',
       `<link rel="manifest" href="${escapedBasePath}manifest.json" />`,
     );
+
+  indexHtml = await installWebRuntime(app, basePath, indexHtml);
 
   await app.register(fastifyMultipart, {
     limits: {
@@ -517,7 +521,12 @@ export async function startIpcBridgeServer(
     }
   };
 
-  websocketServer.on("connection", (socket) => {
+  websocketServer.on("connection", (socket, request) => {
+    const locale = new URL(request.url ?? "/", "http://localhost")
+      .searchParams.get("locale");
+    const languages = normalizeLanguages(
+      locale ?? request.headers["accept-language"] ?? "",
+    );
     sockets.add(socket);
 
     const messagePorts = new Map<string, WebSocketMessagePort>();
@@ -549,7 +558,7 @@ export async function startIpcBridgeServer(
       messagePorts.clear();
     });
 
-    socket.on("message", (rawData) => {
+    socket.on("message", (rawData) => withBrowserLanguages(languages, () => {
       let message: RendererToMainMessage;
       try {
         message = JSON.parse(String(rawData)) as RendererToMainMessage;
@@ -667,7 +676,7 @@ export async function startIpcBridgeServer(
             }
           });
       }
-    });
+    }));
   });
 
   await app.listen({ host: options.host, port: options.port });

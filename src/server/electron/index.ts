@@ -1,3 +1,5 @@
+import { preferredLanguages } from "./locale";
+
 type StubFunction = (...args: unknown[]) => unknown;
 type StubListener = (...args: unknown[]) => void;
 type StubMessagePort = {
@@ -66,7 +68,9 @@ function getIpcMainBridgeState(): IpcMainBridgeState {
 }
 
 function log(method: string, args: unknown[]): void {
-  console.log(`[electron-main-stub] ${method}`, args);
+  if (process.env.CODEX_WEB_ELECTRON_DEBUG === "1") {
+    console.log(`[electron-main-stub] ${method}`, args);
+  }
 }
 
 function createDeepStub(pathLabel: string): StubFunction {
@@ -315,15 +319,15 @@ const appBase = {
   },
   getLocale(): string {
     log("app.getLocale", []);
-    return "en-US";
+    return preferredLanguages()[0]!;
   },
   getSystemLocale(): string {
     log("app.getSystemLocale", []);
-    return "en-US";
+    return preferredLanguages()[0]!;
   },
   getPreferredSystemLanguages(): string[] {
     log("app.getPreferredSystemLanguages", []);
-    return ["en-US"];
+    return preferredLanguages();
   },
   getPath(name: string): string {
     log("app.getPath", [name]);

@@ -244,6 +244,10 @@ function ensureSocket(): void {
 
   const socketUrl = new URL("__backend/ipc", document.baseURI);
   socketUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  socketUrl.searchParams.set(
+    "locale",
+    (navigator.languages?.length ? navigator.languages : [navigator.language]).join(","),
+  );
   socket = new WebSocket(socketUrl);
   socket.addEventListener("open", () => {
     flushOutboundQueue();
