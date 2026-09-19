@@ -1,42 +1,18 @@
 --- a/.vite/build/src-Ct4P_yu5.js
 +++ b/.vite/build/src-Ct4P_yu5.js
-@@ -36032,7 +36032,38 @@
-   pV = 1e3,
-   mV = 1e3,
-   hV = 2e3,
--  gV = 3e4,
-+  gV = (() => {
-+    let e = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_RECONNECT_ATTEMPTS ?? `5`,
-+        10,
-+      ),
-+      t = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_RECONNECT_DELAY_MS ?? `30000`,
-+        10,
-+      ),
-+      n = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS ?? `10000`,
-+        10,
-+      ),
-+      r = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS ?? `10`,
-+        10,
-+      ),
-+      a = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS ??
-+          `300000`,
-+        10,
-+      ),
-+      o = Number.parseInt(
-+        process.env.CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS ??
-+          `300000`,
-+        10,
-+      );
-+    return Math.max(
-+      3e4,
-+      (e + r + 1) * 2 * n + e * t + r * a + (r * (r - 1) * o) / 2 + 5e3,
-+    );
-+  })(),
-   _V = 3e4,
-   vV = 9e4,
-   yV = `Codex app-server initialize handshake timed out`,
+@@ -38407,6 +38407,15 @@
+       return this.options.hostConfig.kind === `remote-control` ? vV : _V;
+     }
+     scheduleInitializeTimeout() {
++      // The external Docker proxy owns connection timeouts and retry policy.
++      if (
++        process.env.CODEX_APP_SERVER_URL &&
++        this.options.transport.kind === `stdio` &&
++        this.options.hostId === `local`
++      ) {
++        this.clearInitializeTimeoutTimer();
++        return;
++      }
+       if (
+         (this.clearInitializeTimeoutTimer(), this.initializeStartedAtMs == null)
+       )
