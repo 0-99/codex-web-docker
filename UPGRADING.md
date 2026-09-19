@@ -141,3 +141,41 @@ finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
 
 Do not publish a release as part of validation. Submit the branch as a pull
 request and review its checks before merging or creating a release separately.
+
+### Merge audit of the earlier fork commits
+
+Audit date: 2026-09-19. The shared ancestor is `8cc728d`; the earlier fork
+baseline is `d6c244d`. Upstream `0dfdc10` adds Desktop/CLI upgrade `0f71e2c`
+and browser tab isolation/app-host reconnect changes. A read-only merge probe
+against both the earlier fork baseline and this feature branch reports a
+content conflict only in `src/server/main.ts`. No upstream merge was performed
+as part of this feature work.
+
+The earlier base-path setup adjoins the old global renderer-socket set, which
+upstream removes. Retain the base-path setup while taking upstream's renderer
+ownership model. The feature branch additionally needs its locale context
+combined with upstream's asynchronous per-renderer message dispatch: retain the
+request argument and run the entire async handler inside `withBrowserLanguages`,
+including the new `rendererReady` wait. Do not restore the old global broadcast
+behavior when resolving these hunks. Update the IPC tests to initialize the new
+renderer factory as part of that upgrade.
+
+The old timeout patch and its regression test reference
+`src-Ct4P_yu5.js` from Desktop `26.707.30751`. Upstream now prepares Desktop
+`26.901.41123`, so a textual merge alone is insufficient: locate the new local
+app-server initialization deadline and regenerate this dedicated patch and test
+against the new extracted file. Verify thread restoration against that CLI's
+protocol as well. This deliberate version upgrade belongs in a separate PR.
+
+Repeat the merge probe for each candidate upstream revision without changing
+the working tree or index:
+
+```sh
+git fetch upstream main
+git merge-tree --write-tree HEAD upstream/main
+```
+
+Configure `upstream` as `https://github.com/0xcaff/codex-web.git` if it does not
+exist. Exit status 1 identifies merge conflicts; a successful textual merge does
+not validate regenerated Desktop patches or runtime behavior. Run the validation
+steps above after resolving and preparing an actual upgrade branch.

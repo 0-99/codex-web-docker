@@ -97,3 +97,21 @@ releases queued requests. Already-sent requests are failed rather than replayed;
 server-request responses from an old transport are discarded. A failed resume
 isolates that thread instead of blocking healthy threads. The associated tests
 use independently restarted mock WebSocket servers and check ordering.
+
+### Earlier fork changes
+
+The fork also carries changes predating these runtime modules:
+
+| Area | Boundary and merge responsibility |
+| --- | --- |
+| Docker image, platform CI and Compose | Fork-owned files; retain the build/runtime dependency split and non-root user |
+| Base-path support | Validation is isolated in `src/server/base-path.ts`; URL routing still needs integration in `main.ts`, browser `routes.ts`, `shim.ts`, `files.ts` and the PWA manifest |
+| Runtime dependencies | `package.json` and its lockfile include the production/build split and runtime `tslib`; reconcile new upstream dependencies before regenerating the lockfile |
+| Extracted Desktop timeout | One dedicated patch, registered by one line in `scripts/prepare_asar`; regenerate against each Desktop bundle upgrade |
+
+Patches are for the extracted, generated Desktop code. Keep small integrations
+in editable upstream TypeScript visible in Git; converting them to install-time
+patches would move the same conflict to patch application and make source review
+harder. Prefer extracting substantial fork behavior into modules while keeping
+the remaining call sites explicit. This reduces merge work, but does not imply
+that future upstream IPC or routing changes will merge without conflicts.
