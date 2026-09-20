@@ -133,6 +133,7 @@ declare const __CODEX_APP_VERSION__: string;
 
 let requestCounter = 0;
 let socket: WebSocket | null = null;
+let needsReload = false;
 let reconnectTimeoutId: number | null = null;
 const outboundQueue: RendererToMainMessage[] = [];
 const pendingInvokes = new Map<
@@ -244,8 +245,18 @@ function ensureSocket(): void {
 
   const socketUrl = new URL("__backend/ipc", document.baseURI);
   socketUrl.protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  socketUrl.searchParams.set(
+    "locale",
+    (navigator.languages?.length ? navigator.languages : [navigator.language]).join(","),
+  );
   socket = new WebSocket(socketUrl);
   socket.addEventListener("open", () => {
+    // App-host RPC transfers MessagePorts once at startup. A new connection needs
+    // a fresh app view; replaying requests against the closed ports cannot recover it.
+    if (needsReload) {
+      window.location.reload();
+      return;
+    }
     flushOutboundQueue();
   });
   socket.addEventListener("message", (event) => {
@@ -260,6 +271,14 @@ function ensureSocket(): void {
     }
   });
   socket.addEventListener("close", () => {
+    needsReload = true;
+    const error = new Error("Connection to Codex was lost");
+    for (const pending of pendingInvokes.values()) pending.reject(error);
+    pendingInvokes.clear();
+    for (const pending of pendingDirectoryEntries.values())
+      pending.reject(error);
+    pendingDirectoryEntries.clear();
+    outboundQueue.length = 0;
     for (const port of messagePorts.values()) {
       port.close();
     }
@@ -568,6 +587,10 @@ export const ipcRenderer = {
         local_remote_control_client_id: null,
         pending_worktrees: [],
       };
+    }
+
+    if (channel === "codex_desktop:get-initial-sidebar-bootstrap") {
+      return null;
     }
 
     if (channel === "codex_desktop:get-system-theme-variant") {

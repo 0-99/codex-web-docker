@@ -4,36 +4,13 @@ import process from "node:process";
 import readline from "node:readline";
 import net from "node:net";
 import { WebSocket } from "ws";
+import { randomUUID } from "node:crypto";
+import { integerSetting, retryPolicy } from "./retry-policy.mjs";
+import { createStatusReporter } from "./proxy-status.mjs";
 
 function fail(message, exitCode = 64) {
   process.stderr.write(`codex-app-server-proxy: ${message}\n`);
   process.exit(exitCode);
-}
-
-function positiveInteger(name, fallback) {
-  const rawValue = process.env[name]?.trim();
-  if (!rawValue) {
-    return fallback;
-  }
-
-  const value = Number(rawValue);
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    fail(`${name} must be a positive integer`);
-  }
-  return value;
-}
-
-function nonNegativeInteger(name, fallback) {
-  const rawValue = process.env[name]?.trim();
-  if (!rawValue) {
-    return fallback;
-  }
-
-  const value = Number(rawValue);
-  if (!Number.isSafeInteger(value) || value < 0) {
-    fail(`${name} must be a non-negative integer`);
-  }
-  return value;
 }
 
 function configuredChoice(name, fallback, choices) {
@@ -91,187 +68,303 @@ function appServerConnection() {
 }
 
 parseInvocation(process.argv.slice(2));
-
 const connection = appServerConnection();
-const maxPayload = positiveInteger(
-  "CODEX_APP_SERVER_MAX_PAYLOAD",
-  100 * 1024 * 1024,
-);
-const handshakeTimeout = positiveInteger(
-  "CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS",
-  10_000,
-);
-const maxReconnectAttempts = nonNegativeInteger(
-  "CODEX_APP_SERVER_RECONNECT_ATTEMPTS",
-  5,
-);
-const reconnectDelay = positiveInteger(
-  "CODEX_APP_SERVER_RECONNECT_DELAY_MS",
-  30_000,
-);
-const maxBackoffReconnectAttempts = nonNegativeInteger(
-  "CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS",
-  10,
-);
-const backoffInitialDelay = positiveInteger(
-  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS",
-  5 * 60_000,
-);
-const backoffDelayIncrement = nonNegativeInteger(
-  "CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS",
-  5 * 60_000,
-);
-const reconnectFailureAction = configuredChoice(
+let policy, maxPayload, handshakeTimeout, resumeTimeout;
+try {
+  policy = retryPolicy(process.env, (message) => log(message));
+  maxPayload = integerSetting(process.env, "MAX_PAYLOAD", 100 * 1024 * 1024, 1);
+  handshakeTimeout = integerSetting(
+    process.env,
+    "HANDSHAKE_TIMEOUT_MS",
+    10_000,
+    1,
+  );
+  resumeTimeout = integerSetting(process.env, "RESUME_TIMEOUT_MS", 30_000, 1);
+} catch (error) {
+  fail(error.message);
+}
+const failureAction = configuredChoice(
   "CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION",
   "exit",
   ["exit", "terminate-parent"],
 );
+const status = createStatusReporter();
 const pendingMessages = [];
+const inFlight = new Map();
+const serverRequests = new Set();
+const threads = new Map();
+const resumeErrors = new Map();
+const internalRequests = new Map();
+const internalPrefix = `codex-web-proxy:${randomUUID()}:`;
+let sequence = 0;
 let initializeRequest = null;
 let initializedOnce = false;
-let inputEnded = false;
-let shuttingDown = false;
-let finished = false;
+let stopping = false;
 let connectionReady = false;
-let quickReconnectAttempts = 0;
-let backoffReconnectAttempts = 0;
+let retryAttempt = 0;
 let reconnectTimeout = null;
 let socket = null;
 let startInitialize = null;
 
-function formatDuration(milliseconds) {
-  if (milliseconds % 60_000 === 0) {
-    const minutes = milliseconds / 60_000;
-    return `${minutes} ${minutes === 1 ? "minute" : "minutes"}`;
-  }
-  if (milliseconds % 1_000 === 0) {
-    const seconds = milliseconds / 1_000;
-    return `${seconds} ${seconds === 1 ? "second" : "seconds"}`;
-  }
-  return `${milliseconds} ms`;
+function log(message) {
+  process.stderr.write(`codex-app-server-proxy: ${message}\n`);
 }
-
-function finish(exitCode) {
-  if (finished) {
-    return;
-  }
-  finished = true;
-  if (reconnectTimeout !== null) {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = null;
-  }
-  process.exitCode = exitCode;
-  input.close();
-}
-
-function scheduleReconnect(error) {
-  if (inputEnded || shuttingDown || finished) {
-    return;
-  }
-
-  process.stderr.write(
-    `codex-app-server-proxy: app-server connection failed: ${error.message}\n`,
+function output(message) {
+  process.stdout.write(
+    `${typeof message === "string" ? message : JSON.stringify(message)}\n`,
   );
-
-  let delay;
-  let attemptDescription;
-  if (quickReconnectAttempts < maxReconnectAttempts) {
-    quickReconnectAttempts += 1;
-    delay = reconnectDelay;
-    attemptDescription = `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`;
-  } else if (backoffReconnectAttempts < maxBackoffReconnectAttempts) {
-    backoffReconnectAttempts += 1;
-    delay =
-      backoffInitialDelay +
-      (backoffReconnectAttempts - 1) * backoffDelayIncrement;
-    if (!Number.isSafeInteger(delay)) {
-      fail("configured reconnect backoff exceeds the supported integer range");
-    }
-    attemptDescription = `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`;
-  } else {
-    process.stderr.write(
-      "codex-app-server-proxy: giving up after " +
-        `${maxReconnectAttempts} quick and ` +
-        `${maxBackoffReconnectAttempts} backoff reconnect attempts\n`,
-    );
-    if (reconnectFailureAction === "terminate-parent") {
-      process.stderr.write(
-        `codex-app-server-proxy: terminating parent process ${process.ppid}\n`,
-      );
+}
+function parse(message) {
+  try {
+    return JSON.parse(message);
+  } catch {
+    return null;
+  }
+}
+function isRequest(message) {
+  return (
+    message &&
+    typeof message.method === "string" &&
+    Object.hasOwn(message, "id")
+  );
+}
+function errorResponse(request, message, code = -32001) {
+  if (isRequest(request)) output({ id: request.id, error: { code, message } });
+}
+function formatDuration(ms) {
+  if (ms % 60_000 === 0)
+    return `${ms / 60_000} ${ms === 60_000 ? "minute" : "minutes"}`;
+  if (ms % 1000 === 0)
+    return `${ms / 1000} ${ms === 1000 ? "second" : "seconds"}`;
+  return `${ms} ms`;
+}
+function stop(exitCode = 0) {
+  if (stopping) return;
+  stopping = true;
+  clearTimeout(reconnectTimeout);
+  for (const pending of internalRequests.values())
+    pending.reject(new Error("proxy stopped"));
+  internalRequests.clear();
+  status.close();
+  input.close();
+  process.stdin.pause();
+  socket?.terminate();
+  process.exitCode = exitCode;
+}
+function scheduleReconnect(error) {
+  if (stopping) return;
+  log(`app-server connection failed: ${error.message}`);
+  const next = policy.next(++retryAttempt);
+  if (!next) {
+    status.update("failed");
+    log(`giving up ${policy.exhausted}`);
+    for (const { parsed } of pendingMessages.splice(0))
+      errorResponse(parsed, "App-server reconnect attempts exhausted.");
+    if (failureAction === "terminate-parent") {
+      log(`terminating parent process ${process.ppid}`);
       try {
         process.kill(process.ppid, "SIGTERM");
       } catch (error) {
-        process.stderr.write(
-          `codex-app-server-proxy: failed to terminate parent process: ${error instanceof Error ? error.message : String(error)}\n`,
-        );
+        log(`failed to terminate parent process: ${error.message}`);
       }
     }
-    finish(1);
+    stop(1);
     return;
   }
-
-  process.stderr.write(
-    `codex-app-server-proxy: reconnecting in ${formatDuration(delay)} ` +
-      `(${attemptDescription})\n`,
-  );
-  reconnectTimeout = setTimeout(() => {
-    reconnectTimeout = null;
-    connect();
-  }, delay);
+  status.update("retry-wait", {
+    attempt: retryAttempt,
+    retryAt: Date.now() + next.delay,
+  });
+  log(`reconnecting in ${formatDuration(next.delay)} (${next.description})`);
+  reconnectTimeout = setTimeout(connect, next.delay);
 }
 
-function send(message) {
-  let parsedMessage;
-  try {
-    parsedMessage = JSON.parse(message);
-  } catch {}
-
+// Never replay creation/history payloads when resuming. Only retain session
+// configuration; persistent history is loaded by threadId on the app-server.
+const resumeKeys = [
+  "model",
+  "modelProvider",
+  "cwd",
+  "approvalPolicy",
+  "approvalsReviewer",
+  "sandbox",
+  "permissions",
+  "config",
+  "baseInstructions",
+  "developerInstructions",
+  "personality",
+  "serviceTier",
+  "runtimeWorkspaceRoots",
+];
+function rememberThread(request, result) {
+  const thread = result?.thread;
+  if (typeof thread?.id !== "string") return;
+  const previous = threads.get(thread.id);
+  const params = { ...previous?.params, threadId: thread.id };
+  for (const key of resumeKeys) {
+    if (request.params?.[key] != null) params[key] = request.params[key];
+  }
+  // Resolved defaults are useful when start/fork used null overrides.
+  for (const key of ["model", "modelProvider", "cwd", "approvalPolicy"]) {
+    if (result[key] != null) params[key] = result[key];
+  }
+  // permissions and legacy sandbox are mutually exclusive.
+  if (request.params?.permissions != null) delete params.sandbox;
+  else if (request.params?.sandbox != null) delete params.permissions;
+  threads.set(thread.id, { params });
+  resumeErrors.delete(thread.id);
+}
+function trackResponse(message) {
+  const request = inFlight.get(message.id);
   if (
-    parsedMessage?.method === "initialize" &&
-    Object.hasOwn(parsedMessage, "id")
+    !request ||
+    (!Object.hasOwn(message, "result") && !Object.hasOwn(message, "error"))
+  )
+    return;
+  inFlight.delete(message.id);
+  if (message.error) return;
+  if (
+    request.method === "turn/start" &&
+    threads.has(request.params?.threadId)
   ) {
-    initializeRequest = { id: parsedMessage.id, message };
+    const thread = threads.get(request.params.threadId);
+    for (const key of resumeKeys) {
+      if (request.params[key] != null) thread.params[key] = request.params[key];
+    }
+    if (request.params.permissions != null) delete thread.params.sandbox;
+    else if (request.params.sandbox != null) delete thread.params.permissions;
+  }
+  if (["thread/start", "thread/resume", "thread/fork"].includes(request.method))
+    rememberThread(request, message.result);
+  if (
+    ["thread/unsubscribe", "thread/archive", "thread/delete"].includes(
+      request.method,
+    )
+  ) {
+    threads.delete(request.params?.threadId);
+    resumeErrors.delete(request.params?.threadId);
+  }
+  if (connectionReady && request.method === "thread/resume") {
+    status.update(resumeErrors.size ? "degraded" : "ready", {
+      failedThreads: resumeErrors.size,
+    });
+  }
+}
+function forward({ raw, parsed }) {
+  // Server-initiated request IDs belong to this connection only. In particular,
+  // do not deliver an old approval response to a restarted server.
+  if (parsed && !parsed.method && Object.hasOwn(parsed, "id")) {
+    if (serverRequests.delete(parsed.id)) socket.send(raw);
+    return;
+  }
+  const threadId = parsed?.params?.threadId;
+  if (
+    resumeErrors.has(threadId) &&
+    parsed.method !== "thread/resume" &&
+    ![
+      "thread/read",
+      "thread/archive",
+      "thread/delete",
+      "thread/unsubscribe",
+    ].includes(parsed.method)
+  ) {
+    errorResponse(
+      parsed,
+      `Thread could not be restored: ${resumeErrors.get(threadId)}`,
+      -32002,
+    );
+    return;
+  }
+  if (isRequest(parsed)) inFlight.set(parsed.id, parsed);
+  socket.send(raw);
+}
+function receiveInput(raw) {
+  const parsed = parse(raw);
+  if (parsed?.method === "initialize" && isRequest(parsed)) {
+    initializeRequest = { id: parsed.id, raw };
     startInitialize?.();
     return;
   }
-
-  if (connectionReady && socket?.readyState === WebSocket.OPEN) {
-    socket.send(message);
+  // The proxy owns this notification, including on every reconnect.
+  if (parsed?.method === "initialized") return;
+  if (
+    socket?.readyState === WebSocket.OPEN &&
+    (connectionReady ||
+      (parsed && !parsed.method && serverRequests.has(parsed.id)))
+  ) {
+    forward({ raw, parsed });
+  } else if (parsed && !parsed.method) {
+    return; // Stale server responses cannot be queued across connections.
+  } else if (pendingMessages.length < 1000) {
+    pendingMessages.push({ raw, parsed });
   } else {
-    pendingMessages.push(message);
+    errorResponse(
+      parsed,
+      "App-server is unavailable and its request queue is full.",
+    );
   }
 }
-
 const input = readline.createInterface({
-  crlfDelay: Number.POSITIVE_INFINITY,
   input: process.stdin,
+  crlfDelay: Infinity,
   terminal: false,
 });
-
 input.on("line", (line) => {
-  if (line.length > 0) {
-    send(line);
-  }
+  if (line) receiveInput(line);
 });
+input.on("close", () => stop());
 
-input.on("close", () => {
-  inputEnded = true;
-  if (reconnectTimeout !== null) {
-    clearTimeout(reconnectTimeout);
-    reconnectTimeout = null;
+function internalRequest(currentSocket, method, params) {
+  const id = internalPrefix + ++sequence;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      // A late resume reply must not accidentally release queued requests.
+      currentSocket.terminate();
+      reject(new Error("app-server thread/resume response timed out"));
+    }, resumeTimeout);
+    internalRequests.set(id, {
+      resolve(value) {
+        clearTimeout(timer);
+        internalRequests.delete(id);
+        resolve(value);
+      },
+      reject(error) {
+        clearTimeout(timer);
+        internalRequests.delete(id);
+        reject(error);
+      },
+    });
+    currentSocket.send(JSON.stringify({ id, method, params }));
+  });
+}
+async function restoreThreads(currentSocket) {
+  resumeErrors.clear();
+  let completed = 0;
+  for (const [threadId, thread] of threads) {
+    if (currentSocket !== socket || currentSocket.readyState !== WebSocket.OPEN)
+      throw new Error("connection lost during thread restore");
+    status.update("resuming", { completed, total: threads.size });
+    // Even an ephemeral thread can survive a transport-only disconnect. Try
+    // resume, but never create a replacement if its process state was lost.
+    const response = await internalRequest(
+      currentSocket,
+      "thread/resume",
+      thread.params,
+    );
+    if (response.error || response.result?.thread?.id !== threadId) {
+      const reason =
+        response.error?.message ||
+        "thread/resume returned an unexpected thread";
+      resumeErrors.set(threadId, reason);
+      log(`thread restore failed: ${reason}`);
+    }
+    completed++;
   }
-  if (socket?.readyState === WebSocket.OPEN) {
-    socket.close(1000, "stdin closed");
-  } else if (socket?.readyState === WebSocket.CONNECTING) {
-    socket.terminate();
-  }
-});
-
+}
 function connect() {
-  if (inputEnded || shuttingDown || finished) {
-    return;
-  }
-
+  if (stopping) return;
+  reconnectTimeout = null;
+  status.update("connecting", { attempt: retryAttempt });
   const currentSocket = new WebSocket(connection.url, {
     ...connection.options,
     handshakeTimeout,
@@ -281,139 +374,127 @@ function connect() {
   socket = currentSocket;
   connectionReady = false;
   let connectionError = null;
-  let awaitingInitializeResponse = false;
-  let initializeResponseTimeout = null;
-
-  function clearInitializeResponseTimeout() {
-    if (initializeResponseTimeout !== null) {
-      clearTimeout(initializeResponseTimeout);
-      initializeResponseTimeout = null;
-    }
-  }
-
-  function flushPendingMessages() {
-    for (const message of pendingMessages.splice(0)) {
-      currentSocket.send(message);
-    }
-  }
-
-  function initializeConnection() {
+  let initializing = false;
+  let initializeTimer;
+  function initialize() {
     if (
-      currentSocket.readyState !== WebSocket.OPEN ||
-      awaitingInitializeResponse ||
-      initializeRequest === null
-    ) {
+      initializing ||
+      !initializeRequest ||
+      currentSocket.readyState !== WebSocket.OPEN
+    )
       return;
-    }
-
-    connectionReady = false;
-    awaitingInitializeResponse = true;
-    currentSocket.send(initializeRequest.message);
-    initializeResponseTimeout = setTimeout(() => {
+    initializing = true;
+    currentSocket.send(initializeRequest.raw);
+    initializeTimer = setTimeout(() => {
       connectionError = new Error("app-server initialize response timed out");
       currentSocket.terminate();
     }, handshakeTimeout);
   }
-
-  startInitialize = initializeConnection;
-
-  currentSocket.on("open", () => {
-    initializeConnection();
-    if (inputEnded) {
-      currentSocket.close(1000, "stdin closed");
-    }
-  });
-
-  currentSocket.on("message", (data, isBinary) => {
+  startInitialize = initialize;
+  currentSocket.on("open", initialize);
+  currentSocket.on("message", async (data, isBinary) => {
     if (isBinary) {
       connectionError = new Error("received an unexpected binary frame");
-      currentSocket.close(1003, "text frames required");
+      currentSocket.terminate();
       return;
     }
-
-    const message = data.toString();
-    if (awaitingInitializeResponse && initializeRequest !== null) {
-      let parsedMessage;
-      try {
-        parsedMessage = JSON.parse(message);
-      } catch {}
-
-      if (
-        parsedMessage?.id === initializeRequest.id &&
-        (Object.hasOwn(parsedMessage, "result") ||
-          Object.hasOwn(parsedMessage, "error"))
-      ) {
-        clearInitializeResponseTimeout();
-        awaitingInitializeResponse = false;
-        if (parsedMessage.error) {
-          connectionError = new Error(
-            parsedMessage.error.message ?? "app-server initialize failed",
-          );
-          currentSocket.close(1011, "app-server initialize failed");
-          return;
-        }
-
-        const wasAlreadyInitialized = initializedOnce;
-        const successfulAttempt =
-          backoffReconnectAttempts > 0
-            ? `backoff attempt ${backoffReconnectAttempts}/${maxBackoffReconnectAttempts}`
-            : quickReconnectAttempts > 0
-              ? `quick attempt ${quickReconnectAttempts}/${maxReconnectAttempts}`
-              : null;
-        initializedOnce = true;
-        connectionReady = true;
-        quickReconnectAttempts = 0;
-        backoffReconnectAttempts = 0;
-        process.stderr.write(
-          "codex-app-server-proxy: app-server connection " +
-            `${wasAlreadyInitialized ? "restored" : "established"}` +
-            `${successfulAttempt === null ? "" : ` after ${successfulAttempt}`}\n`,
+    const raw = data.toString();
+    const message = parse(raw);
+    if (
+      message &&
+      !message.method &&
+      internalRequests.has(message.id) &&
+      (Object.hasOwn(message, "result") || Object.hasOwn(message, "error"))
+    ) {
+      internalRequests.get(message.id).resolve(message);
+      return;
+    }
+    if (
+      initializing &&
+      message?.id === initializeRequest.id &&
+      (Object.hasOwn(message, "result") || Object.hasOwn(message, "error"))
+    ) {
+      clearTimeout(initializeTimer);
+      initializing = false;
+      startInitialize = null;
+      if (message.error) {
+        connectionError = new Error(
+          message.error.message || "app-server initialize failed",
         );
-        if (!wasAlreadyInitialized) {
-          process.stdout.write(`${message}\n`);
-        }
-        flushPendingMessages();
+        currentSocket.terminate();
         return;
       }
+      const wasInitialized = initializedOnce;
+      const attempt = retryAttempt
+        ? policy.next(retryAttempt)?.description
+        : null;
+      currentSocket.send(JSON.stringify({ method: "initialized" }));
+      status.update("connected");
+      log(
+        `app-server connection ${wasInitialized ? "restored" : "established"}${attempt ? ` after ${attempt}` : ""}`,
+      );
+      // Only the first initialize response belongs to the stdio client.
+      if (!wasInitialized) {
+        initializedOnce = true;
+        output(raw);
+      }
+      try {
+        await restoreThreads(currentSocket);
+        if (
+          stopping ||
+          currentSocket !== socket ||
+          currentSocket.readyState !== WebSocket.OPEN
+        )
+          return;
+        connectionReady = true;
+        retryAttempt = 0;
+        status.update(resumeErrors.size ? "degraded" : "ready", {
+          failedThreads: resumeErrors.size,
+        });
+        for (const message of pendingMessages.splice(0)) forward(message);
+      } catch (error) {
+        connectionError = error;
+        currentSocket.terminate();
+      }
+      return;
     }
-
-    process.stdout.write(`${message}\n`);
+    if (isRequest(message)) serverRequests.add(message.id);
+    if (message) {
+      trackResponse(message);
+      if (
+        ["thread/archived", "thread/deleted", "thread/closed"].includes(
+          message.method,
+        )
+      ) {
+        threads.delete(message.params?.threadId);
+        resumeErrors.delete(message.params?.threadId);
+      }
+    }
+    output(raw);
   });
-
   currentSocket.on("error", (error) => {
     connectionError = error;
   });
-
-  currentSocket.on("close", (code, reason) => {
-    clearInitializeResponseTimeout();
-    if (socket === currentSocket) {
-      socket = null;
-      connectionReady = false;
-      startInitialize = null;
-    }
-    if (inputEnded || shuttingDown || finished) {
-      return;
-    }
-
+  currentSocket.on("close", (code) => {
+    clearTimeout(initializeTimer);
+    if (socket !== currentSocket) return;
+    socket = null;
+    connectionReady = false;
+    startInitialize = null;
+    serverRequests.clear();
+    for (const pending of internalRequests.values())
+      pending.reject(new Error("connection lost during thread restore"));
+    internalRequests.clear();
+    for (const request of inFlight.values())
+      errorResponse(
+        request,
+        "App-server connection lost; request outcome is unknown. It was not retried.",
+      );
+    inFlight.clear();
     scheduleReconnect(
-      connectionError ??
-        new Error(
-          `connection closed with code ${code}${reason.length ? ` (${reason.toString()})` : ""}`,
-        ),
+      connectionError || new Error(`connection closed with code ${code}`),
     );
   });
 }
-
-for (const signal of ["SIGINT", "SIGTERM"]) {
-  process.on(signal, () => {
-    shuttingDown = true;
-    input.close();
-    if (socket?.readyState === WebSocket.OPEN) {
-      socket.close(1001, signal);
-    } else if (socket?.readyState === WebSocket.CONNECTING) {
-      socket.terminate();
-    }
-  });
-}
-
+for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => stop());
 connect();

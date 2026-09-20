@@ -97,3 +97,89 @@ as loading taking forever (more than 1m). look out for that case too.
 
 if there are errors, bring them to the users attention and we will decide how to
 proceed.
+
+## Maintaining this Docker/web fork
+
+Before merging `0xcaff/codex-web`, start from an up-to-date fork `main` on a
+separate branch. Review the extension-boundary table in `ARCHITECTURE.md` and
+preserve `docker/`, `examples/` and `DOCKER.md` as fork-owned files. Keep edits to
+upstream source files limited to their integration points. Do not include an
+unrelated Codex Desktop/CLI version upgrade in a feature change.
+
+For the external app-server integration, verify these invariants after a merge:
+
+1. `main.ts` still installs `installWebRuntime` and serves injected assets at the
+   configured base path, including direct links to nested routes.
+2. Browser IPC advertises `navigator.languages`; dispatch runs within the locale
+   context and the Electron locale methods use it. Upstream's explicit
+   `localeOverride` must remain authoritative.
+3. Verify that the actual local-host factory enables
+   `continueWaitingForStdioInitializeTimeout` and the timeout callback keeps
+   initialization pending. The former fork timeout patch is no longer needed.
+   Port `test/initialize-timeout.test.mjs` to the new bundles, including its
+   checks of other transports. Do not disable upstream deadlines globally.
+4. Check the pinned app-server protocol for `initialize` + `initialized`,
+   `thread/resume` parameters and thread lifecycle notifications. Preserve
+   session configuration without replaying start/fork/history payloads.
+5. Inspect the real Desktop root/chat layout when changing viewport-related
+   selectors. The browser regression fixture checks viewport behavior, but a
+   real Android/iOS keyboard remains a useful deployment smoke check.
+
+Validation (after preparing the extracted application):
+
+```sh
+npm test
+npm run build:browser
+npx playwright install chromium
+npm run test:browser-runtime
+```
+
+`npm test` covers proxy recovery, retry configuration, locale isolation, status
+transport/SSE and existing base-path behavior. Browser tests cover visible
+countdowns, recovery, draft preservation and mobile/desktop viewport sizing in
+a small chat-layout fixture. Docker CI additionally builds every supported
+architecture, checks initialization with an unavailable app-server, verifies
+finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
+
+Do not publish a release as part of validation. Submit the branch as a pull
+request and review its checks before merging or creating a release separately.
+
+### Upstream upgrade completed on 2026-09-20
+
+The earlier audit used common ancestor `8cc728d` and fork baseline `d6c244d`.
+Both that baseline and the runtime feature branch conflicted with upstream
+`0dfdc10` in `src/server/main.ts`. The merge includes that upstream revision
+as a merge parent, including Desktop `26.901.41123`,
+the upstream CLI pin `0.153.3`, and per-tab renderer ownership.
+
+The merge retains our base-path setup while taking upstream's renderer factory,
+message-port buffering, tab isolation and browser IPC reconnect behavior. The
+entire asynchronous IPC dispatch stays inside `withBrowserLanguages`, including
+the `rendererReady` wait. Tests verify isolated replies, new renderer IDs after
+reconnect, early MessagePort delivery and browser locale isolation.
+
+The new Desktop already enables `continueWaitingForStdioInitializeTimeout` for
+the local host. The former `app-server-initialize-timeout.patch` and its prepare
+hook have therefore been removed. The regression test executes the actual
+upstream timeout callback and verifies its local-host factory setting. There
+are no fork-only extracted-code patches left from this feature set.
+
+The new CLI schema was checked for `thread/resume`. Creation-only `serviceName`
+is no longer forwarded; `serviceTier` and `runtimeWorkspaceRoots` are retained.
+The Docker image still excludes the CLI: its app-server is deployed separately.
+A real CLI initialization handshake was checked locally; starting a real thread
+requires sandbox facilities unavailable in this work environment. Thread
+recovery ordering, retries and failure handling are covered by mock-server tests.
+
+For each future candidate, perform a read-only merge probe without changing
+the working tree or index:
+
+```sh
+git fetch upstream main
+git merge-tree --write-tree HEAD upstream/main
+```
+
+Configure `upstream` as `https://github.com/0xcaff/codex-web.git` if it does not
+exist. Exit status 1 identifies merge conflicts; a successful textual merge does
+not validate Desktop patches or runtime behavior. Run the validation steps above
+after resolving and preparing the upgrade branch.

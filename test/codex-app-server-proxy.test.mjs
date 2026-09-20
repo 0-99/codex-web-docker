@@ -30,7 +30,7 @@ function echoConnections(server) {
         socket.send(JSON.stringify({ id: parsedMessage.id, result: {} }));
         return;
       }
-      socket.send(message);
+      if (parsedMessage.method !== "initialized") socket.send(message);
     });
   });
   return connections;
@@ -294,4 +294,24 @@ test("can terminate its parent after reconnect attempts are exhausted", async (t
   const [exitCode, signal] = await once(wrapper, "exit");
   assert.equal(exitCode, null);
   assert.equal(signal, "SIGTERM");
+});
+
+test("unlimited startup retries continue beyond the legacy attempt count", { timeout: 5000 }, async (t) => {
+  const port = await unusedPort();
+  const child = spawnProxy(t, `ws://127.0.0.1:${port}`, {
+    CODEX_APP_SERVER_RETRY_DELAYS_MS: "10",
+    CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
+  });
+  const stderr = capture(child.stderr);
+  const output = readline.createInterface({ input: child.stdout });
+  const response = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "init", method: "initialize" }) + "\n");
+  await stderr.waitFor(/\(attempt 20\)/);
+  assert.equal(child.exitCode, null);
+  const server = new WebSocketServer({ host: "127.0.0.1", port });
+  const connections = echoConnections(server);
+  t.after(() => { for (const socket of connections) socket.terminate(); server.close(); });
+  assert.equal(JSON.parse((await response)[0]).id, "init");
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
 });

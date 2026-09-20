@@ -1,0 +1,10 @@
+# Optional overlay for an EXISTING, separately managed codex-cli service.
+# Rename `codex-cli` to match that service in your own Compose file, then merge:
+# docker compose -f your-cli-compose.yml -f app-server-security.compose.yml up -d
+# The existing file supplies the image, command, authentication and persistence.
+services:
+  codex-cli:
+    security_opt:
+      - seccomp=unconfined
+      - systempaths=unconfined
+    # The tested deployment did not need SYS_ADMIN or apparmor=unconfined.
