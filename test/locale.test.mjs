@@ -34,6 +34,10 @@ test(
       { startMainApp: false },
     );
     t.after(() => app.close());
+    globalThis.__codexElectronIpcBridge.setRendererWindowFactory(async () => {
+      await delay(10);
+      return new electron.BrowserWindow({ show: false });
+    });
     electron.ipcMain.handle("test-locale", async () => {
       await delay(20);
       return {

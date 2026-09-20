@@ -193,7 +193,8 @@ const resumeKeys = [
   "baseInstructions",
   "developerInstructions",
   "personality",
-  "serviceName",
+  "serviceTier",
+  "runtimeWorkspaceRoots",
 ];
 function rememberThread(request, result) {
   const thread = result?.thread;

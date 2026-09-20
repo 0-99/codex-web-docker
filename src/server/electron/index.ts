@@ -34,26 +34,29 @@ type IpcMainEvent = {
 };
 
 type IpcMainBridgeState = {
-  broadcastToRenderer?: (message: {
-    type: "ipc-main-event";
-    channel: string;
-    args: unknown[];
-  }) => void;
+  sendToRenderer?: (
+    webContentsId: number,
+    message: {
+      type: "ipc-main-event";
+      channel: string;
+      args: unknown[];
+    },
+  ) => void;
   handleRendererInvoke?: (
     channel: string,
     args: unknown[],
-    sourceUrl?: string,
+    windowId: number,
   ) => Promise<unknown>;
   handleRendererPostMessage?: (
     channel: string,
     message: unknown,
     ports: StubMessagePort[],
-    sourceUrl?: string,
+    windowId: number,
   ) => void;
   handleRendererSend?: (
     channel: string,
     args: unknown[],
-    sourceUrl?: string,
+    windowId: number,
   ) => void;
 };
 
@@ -170,51 +173,28 @@ function createMessagePortStub(label: string): {
   };
 }
 
-const rendererUrl = "http://localhost:5175/";
-const rendererMainFrame = {
-  url: rendererUrl,
-};
-const rendererWebContentsEmitter = createEmitterStub("ipcMainEvent.sender");
-const rendererWebContents: StubWebContents = {
-  id: 1001,
-  mainFrame: rendererMainFrame,
-  getURL: () => rendererMainFrame.url,
-  isDestroyed: () => false,
-  off: rendererWebContentsEmitter.off,
-  on: rendererWebContentsEmitter.on,
-  once: rendererWebContentsEmitter.once,
-  removeListener: rendererWebContentsEmitter.removeListener,
-  send: (channel: string, ...args: unknown[]): void => {
-    getIpcMainBridgeState().broadcastToRenderer?.({
-      type: "ipc-main-event",
-      channel,
-      args,
-    });
-  },
-};
-
-function createIpcMainEvent(ports: StubMessagePort[] = []): IpcMainEvent {
-  const sender =
-    (BrowserWindow.fromWebContents(rendererWebContents)
-      ?.webContents as unknown as StubWebContents | undefined) ??
-    rendererWebContents;
-  const event: IpcMainEvent = {
+function createIpcMainEvent(
+  windowId: number,
+  ports: StubMessagePort[] = [],
+): IpcMainEvent {
+  const window = BrowserWindow.fromId(windowId);
+  if (!window || window.isDestroyed()) {
+    throw new Error(
+      `[electron-main-stub] Renderer window ${windowId} is closed`,
+    );
+  }
+  const sender = window.webContents as unknown as StubWebContents;
+  return {
     returnValue: undefined,
-    processId: 1,
+    processId: windowId,
     frameId: 1,
     sender,
     senderFrame: sender.mainFrame,
     ports,
     reply: (channel: string, ...args: unknown[]): void => {
-      getIpcMainBridgeState().broadcastToRenderer?.({
-        type: "ipc-main-event",
-        channel,
-        args,
-      });
+      sender.send(channel, ...args);
     },
   };
-
-  return event;
 }
 
 function createIpcMainStub(): {
@@ -235,7 +215,7 @@ function createIpcMainStub(): {
 
   const pendingPostMessages = new Map<
     string,
-    Array<{ message: unknown; ports: StubMessagePort[] }>
+    Array<{ message: unknown; ports: StubMessagePort[]; windowId: number }>
   >();
   const registeredPostMessageChannels = new Set<string>();
 
@@ -243,34 +223,36 @@ function createIpcMainStub(): {
     channel: string,
     message: unknown,
     ports: StubMessagePort[],
+    windowId: number,
   ): void => {
     if (registeredPostMessageChannels.has(channel)) {
-      emitter.emit(channel, createIpcMainEvent(ports), message);
+      emitter.emit(channel, createIpcMainEvent(windowId, ports), message);
       return;
     }
     const pending = pendingPostMessages.get(channel) ?? [];
-    pending.push({ message, ports });
+    pending.push({ message, ports, windowId });
     pendingPostMessages.set(channel, pending);
   };
 
   bridgeState.handleRendererInvoke = async (
     channel: string,
     args: unknown[],
+    windowId: number,
   ): Promise<unknown> => {
     const handler = handlers.get(channel);
     if (!handler) {
       throw new Error(`[electron-main-stub] No ipcMain.handle for ${channel}`);
     }
-    const event = createIpcMainEvent();
+    const event = createIpcMainEvent(windowId);
     return await Promise.resolve(handler(event, ...args));
   };
 
   bridgeState.handleRendererSend = (
     channel: string,
     args: unknown[],
-    sourceUrl?: string,
+    windowId: number,
   ): void => {
-    const event = createIpcMainEvent();
+    const event = createIpcMainEvent(windowId);
     emitter.emit(channel, event, ...args);
   };
 
@@ -281,8 +263,9 @@ function createIpcMainStub(): {
       const pending = pendingPostMessages.get(channel);
       if (pending) {
         pendingPostMessages.delete(channel);
-        for (const { message, ports } of pending) {
-          emitter.emit(channel, createIpcMainEvent(ports), message);
+        for (const { message, ports, windowId } of pending) {
+          if (!BrowserWindow.fromId(windowId)) continue;
+          emitter.emit(channel, createIpcMainEvent(windowId, ports), message);
         }
       }
       return result;
@@ -416,11 +399,26 @@ const app = new Proxy(appBase as Record<string, unknown>, {
 }) as typeof appBase;
 
 class BrowserWindow {
+  static isInputShapeSupported(): boolean {
+    return false;
+  }
+
+  static isSystemBackdropSupported(): boolean {
+    return false;
+  }
+
+  static fromId(id: number): BrowserWindow | null {
+    return (
+      BrowserWindow.getAllWindows().find((window) => window.id === id) ?? null
+    );
+  }
+
   static nextId = 1;
   static allWindows: BrowserWindow[] = [];
   static focusedWindow: BrowserWindow | null = null;
   id: number;
   private destroyed = false;
+  private visible = true;
   private title = "Codex";
   private bounds = { x: 0, y: 0, width: 1280, height: 820 };
   webContents: Record<string, unknown>;
@@ -428,6 +426,7 @@ class BrowserWindow {
 
   constructor(...args: unknown[]) {
     log("new BrowserWindow", args);
+    this.visible = (args[0] as { show?: boolean } | undefined)?.show !== false;
     this.id = BrowserWindow.nextId++;
     this.emitter = createEmitterStub(`BrowserWindow#${this.id}`);
 
@@ -444,8 +443,8 @@ class BrowserWindow {
         getURL: (): string => {
           log(`BrowserWindow#${this.id}.webContents.getURL`, []);
           return String(
-            (this.webContents.mainFrame as { url?: string } | undefined)
-              ?.url ?? "",
+            (this.webContents.mainFrame as { url?: string } | undefined)?.url ??
+              "",
           );
         },
         isDestroyed: (): boolean => this.destroyed,
@@ -468,15 +467,22 @@ class BrowserWindow {
             return;
           }
           const [channel, ...args] = sendArgs as [string, ...unknown[]];
-          getIpcMainBridgeState().broadcastToRenderer?.({
-            type: "ipc-main-event",
-            channel,
-            args,
-          });
+          getIpcMainBridgeState().sendToRenderer?.(
+            this.webContents.id as number,
+            {
+              type: "ipc-main-event",
+              channel,
+              args,
+            },
+          );
         },
       } as Record<string, unknown>,
       {
         get: (target, prop) => {
+          // Async Electron APIs can return this proxy; it must not be thenable.
+          if (prop === "then") {
+            return undefined;
+          }
           if (prop in target) {
             return target[prop as keyof typeof target];
           }
@@ -487,16 +493,20 @@ class BrowserWindow {
       },
     );
 
-    BrowserWindow.allWindows.push(this);
-    BrowserWindow.focusedWindow = this;
-    return new Proxy(this, {
+    const window = new Proxy(this, {
       get: (target, prop) => {
+        if (prop === "then") {
+          return undefined;
+        }
         if (prop in target) {
           return target[prop as keyof typeof target];
         }
         return createDeepStub(`BrowserWindow#${target.id}.${String(prop)}`);
       },
     });
+    BrowserWindow.allWindows.push(window);
+    BrowserWindow.focusedWindow = window;
+    return window;
   }
 
   static getAllWindows(): BrowserWindow[] {
@@ -506,10 +516,7 @@ class BrowserWindow {
 
   static getFocusedWindow(): BrowserWindow | null {
     log("BrowserWindow.getFocusedWindow", []);
-    if (
-      BrowserWindow.focusedWindow &&
-      !BrowserWindow.focusedWindow.destroyed
-    ) {
+    if (BrowserWindow.focusedWindow && !BrowserWindow.focusedWindow.destroyed) {
       return BrowserWindow.focusedWindow;
     }
     return BrowserWindow.getAllWindows()[0] ?? null;
@@ -563,7 +570,12 @@ class BrowserWindow {
 
   destroy(): void {
     log(`BrowserWindow#${this.id}.destroy`, []);
+    if (this.destroyed) return;
     this.destroyed = true;
+    (this.webContents.emit as StubFunction)("destroyed");
+    BrowserWindow.allWindows = BrowserWindow.allWindows.filter(
+      (window) => window !== this,
+    );
     if (BrowserWindow.focusedWindow === this) {
       BrowserWindow.focusedWindow = null;
     }
@@ -578,6 +590,10 @@ class BrowserWindow {
   isFocused(): boolean {
     log(`BrowserWindow#${this.id}.isFocused`, []);
     return BrowserWindow.focusedWindow === this && !this.destroyed;
+  }
+
+  isVisible(): boolean {
+    return this.visible && !this.destroyed;
   }
 
   removeMenu(): void {
@@ -616,10 +632,12 @@ class BrowserWindow {
 
   show(): void {
     log(`BrowserWindow#${this.id}.show`, []);
+    this.visible = true;
   }
 
   hide(): void {
     log(`BrowserWindow#${this.id}.hide`, []);
+    this.visible = false;
   }
 
   focus(): void {
@@ -821,7 +839,44 @@ const nativeImage = {
     };
   },
 };
-const powerMonitor = createEmitterStub("powerMonitor");
+const powerMonitor = {
+  ...createEmitterStub("powerMonitor"),
+  getSystemIdleState(_idleThreshold: number): string {
+    return "unknown";
+  },
+  getSystemIdleTime(): number {
+    return 0;
+  },
+  isOnBatteryPower(): boolean {
+    return false;
+  },
+};
+// Desktop shortcuts and sleep inhibitors have no native window in the web host.
+const globalShortcut = {
+  register(...args: unknown[]): boolean {
+    log("globalShortcut.register", args);
+    return false;
+  },
+  isRegistered(_accelerator: string): boolean {
+    return false;
+  },
+  unregister(...args: unknown[]): void {
+    log("globalShortcut.unregister", args);
+  },
+  unregisterAll(): void {},
+};
+const powerSaveBlocker = {
+  start(type: string): number {
+    log("powerSaveBlocker.start", [type]);
+    return 0;
+  },
+  stop(id: number): void {
+    log("powerSaveBlocker.stop", [id]);
+  },
+  isStarted(_id: number): boolean {
+    return false;
+  },
+};
 const screen = {
   ...createEmitterStub("screen"),
   getAllDisplays(): Array<{
@@ -877,7 +932,13 @@ const protocol = {
   },
 };
 function createSessionStub(label: string): {
+  cookies: ReturnType<typeof createEmitterStub> & {
+    get: (...args: unknown[]) => Promise<unknown[]>;
+    remove: (...args: unknown[]) => Promise<void>;
+    set: (...args: unknown[]) => Promise<void>;
+  };
   getUserAgent: () => string;
+  getDownloadHistory: () => Promise<unknown[]>;
   loadExtension: (extensionPath: string) => Promise<{
     id: string;
     name: string;
@@ -891,6 +952,7 @@ function createSessionStub(label: string): {
   removeListener: (event: string, listener: StubListener) => unknown;
   setPermissionCheckHandler: (...args: unknown[]) => void;
   setPermissionRequestHandler: (...args: unknown[]) => void;
+  setPreferredLanguages: (languages: string[]) => void;
   webRequest: {
     onBeforeRequest: (...args: unknown[]) => void;
     onBeforeSendHeaders: (...args: unknown[]) => void;
@@ -898,6 +960,22 @@ function createSessionStub(label: string): {
 } {
   const emitter = createEmitterStub(label);
   return {
+    cookies: {
+      ...createEmitterStub(`${label}.cookies`),
+      async get(...args: unknown[]): Promise<unknown[]> {
+        log(`${label}.cookies.get`, args);
+        return [];
+      },
+      async remove(...args: unknown[]): Promise<void> {
+        log(`${label}.cookies.remove`, args);
+      },
+      async set(...args: unknown[]): Promise<void> {
+        log(`${label}.cookies.set`, args);
+      },
+    },
+    async getDownloadHistory(): Promise<unknown[]> {
+      return [];
+    },
     async loadExtension(extensionPath: string): Promise<{
       id: string;
       name: string;
@@ -927,6 +1005,9 @@ function createSessionStub(label: string): {
     setPermissionRequestHandler(...args: unknown[]): void {
       log(`${label}.setPermissionRequestHandler`, args);
     },
+    setPreferredLanguages(languages: string[]): void {
+      log(`${label}.setPreferredLanguages`, [languages]);
+    },
     webRequest: {
       onBeforeRequest(...args: unknown[]): void {
         log(`${label}.webRequest.onBeforeRequest`, args);
@@ -937,14 +1018,19 @@ function createSessionStub(label: string): {
     },
   };
 }
-const partitionSessions = new Map<string, ReturnType<typeof createSessionStub>>();
+const partitionSessions = new Map<
+  string,
+  ReturnType<typeof createSessionStub>
+>();
 const session = {
   defaultSession: createSessionStub("session.defaultSession"),
   fromPartition(partition: string): ReturnType<typeof createSessionStub> {
     log("session.fromPartition", [partition]);
     let partitionSession = partitionSessions.get(partition);
     if (!partitionSession) {
-      partitionSession = createSessionStub(`session.fromPartition(${partition})`);
+      partitionSession = createSessionStub(
+        `session.fromPartition(${partition})`,
+      );
       partitionSessions.set(partition, partitionSession);
     }
     return partitionSession;
@@ -989,6 +1075,8 @@ const electronModule = new Proxy(
     nativeTheme,
     Notification,
     powerMonitor,
+    powerSaveBlocker,
+    globalShortcut,
     protocol,
     screen,
     session,
@@ -1022,6 +1110,8 @@ export {
   nativeTheme,
   Notification,
   powerMonitor,
+  powerSaveBlocker,
+  globalShortcut,
   protocol,
   screen,
   session,

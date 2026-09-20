@@ -113,9 +113,11 @@ For the external app-server integration, verify these invariants after a merge:
 2. Browser IPC advertises `navigator.languages`; dispatch runs within the locale
    context and the Electron locale methods use it. Upstream's explicit
    `localeOverride` must remain authoritative.
-3. Regenerate `app-server-initialize-timeout.patch` using `diff` against the
-   prettified original. Its guard only applies to the external local stdio
-   proxy; do not disable upstream native/remote-control timeouts globally.
+3. Verify that the actual local-host factory enables
+   `continueWaitingForStdioInitializeTimeout` and the timeout callback keeps
+   initialization pending. The former fork timeout patch is no longer needed.
+   Port `test/initialize-timeout.test.mjs` to the new bundles, including its
+   checks of other transports. Do not disable upstream deadlines globally.
 4. Check the pinned app-server protocol for `initialize` + `initialized`,
    `thread/resume` parameters and thread lifecycle notifications. Preserve
    session configuration without replaying start/fork/history payloads.
@@ -142,32 +144,34 @@ finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
 Do not publish a release as part of validation. Submit the branch as a pull
 request and review its checks before merging or creating a release separately.
 
-### Merge audit of the earlier fork commits
+### Upstream upgrade completed on 2026-09-20
 
-Audit date: 2026-09-19. The shared ancestor is `8cc728d`; the earlier fork
-baseline is `d6c244d`. Upstream `0dfdc10` adds Desktop/CLI upgrade `0f71e2c`
-and browser tab isolation/app-host reconnect changes. A read-only merge probe
-against both the earlier fork baseline and this feature branch reports a
-content conflict only in `src/server/main.ts`. No upstream merge was performed
-as part of this feature work.
+The earlier audit used common ancestor `8cc728d` and fork baseline `d6c244d`.
+Both that baseline and the runtime feature branch conflicted with upstream
+`0dfdc10` in `src/server/main.ts`. At the user's request, this PR now includes
+that upstream revision as a merge parent, including Desktop `26.901.41123`,
+the upstream CLI pin `0.153.3`, and per-tab renderer ownership.
 
-The earlier base-path setup adjoins the old global renderer-socket set, which
-upstream removes. Retain the base-path setup while taking upstream's renderer
-ownership model. The feature branch additionally needs its locale context
-combined with upstream's asynchronous per-renderer message dispatch: retain the
-request argument and run the entire async handler inside `withBrowserLanguages`,
-including the new `rendererReady` wait. Do not restore the old global broadcast
-behavior when resolving these hunks. Update the IPC tests to initialize the new
-renderer factory as part of that upgrade.
+The merge retains our base-path setup while taking upstream's renderer factory,
+message-port buffering, tab isolation and browser IPC reconnect behavior. The
+entire asynchronous IPC dispatch stays inside `withBrowserLanguages`, including
+the `rendererReady` wait. Tests verify isolated replies, new renderer IDs after
+reconnect, early MessagePort delivery and browser locale isolation.
 
-The old timeout patch and its regression test reference
-`src-Ct4P_yu5.js` from Desktop `26.707.30751`. Upstream now prepares Desktop
-`26.901.41123`, so a textual merge alone is insufficient: locate the new local
-app-server initialization deadline and regenerate this dedicated patch and test
-against the new extracted file. Verify thread restoration against that CLI's
-protocol as well. This deliberate version upgrade belongs in a separate PR.
+The new Desktop already enables `continueWaitingForStdioInitializeTimeout` for
+the local host. The former `app-server-initialize-timeout.patch` and its prepare
+hook have therefore been removed. The regression test executes the actual
+upstream timeout callback and verifies its local-host factory setting. There
+are no fork-only extracted-code patches left from this feature set.
 
-Repeat the merge probe for each candidate upstream revision without changing
+The new CLI schema was checked for `thread/resume`. Creation-only `serviceName`
+is no longer forwarded; `serviceTier` and `runtimeWorkspaceRoots` are retained.
+The Docker image still excludes the CLI: its app-server is deployed separately.
+A real CLI initialization handshake was checked locally; starting a real thread
+requires sandbox facilities unavailable in this work environment. Thread
+recovery ordering, retries and failure handling are covered by mock-server tests.
+
+For each future candidate, perform a read-only merge probe without changing
 the working tree or index:
 
 ```sh
@@ -177,5 +181,5 @@ git merge-tree --write-tree HEAD upstream/main
 
 Configure `upstream` as `https://github.com/0xcaff/codex-web.git` if it does not
 exist. Exit status 1 identifies merge conflicts; a successful textual merge does
-not validate regenerated Desktop patches or runtime behavior. Run the validation
-steps above after resolving and preparing an actual upgrade branch.
+not validate Desktop patches or runtime behavior. Run the validation steps above
+after resolving and preparing the upgrade branch.

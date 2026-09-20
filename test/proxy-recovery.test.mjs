@@ -109,6 +109,9 @@ test(
       cwd: "/workspace",
       config: { x: true },
       ephemeral: false,
+      serviceName: "creation-only-metadata",
+      serviceTier: "fast",
+      runtimeWorkspaceRoots: ["/workspace"],
       history: ["must not be replayed"],
     });
     await f.call("thread/start", { model: "example-model" });
@@ -120,6 +123,8 @@ test(
       threadId: "thread-1",
       cwd: "/workspace",
       config: { x: true },
+      serviceTier: "fast",
+      runtimeWorkspaceRoots: ["/workspace"],
     });
     assert.equal(f.requests.filter((r) => r.method === "turn/start").length, 0);
     resumes[0].reply({ thread: { id: "thread-1" } });

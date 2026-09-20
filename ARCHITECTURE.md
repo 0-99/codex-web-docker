@@ -78,13 +78,13 @@ extracted Desktop application. Do not fold these modules into Desktop bundles.
 | `src/server/web-runtime.ts` | Status aggregation, JSON/SSE endpoints and injection of fork-owned browser assets |
 | `docker/browser/runtime.js` / `runtime.css` | Startup/reconnect panel, countdown and mobile visual viewport sizing |
 | `src/server/electron/locale.ts` | Request-scoped browser locale and system fallback |
-| `patches/app-server-initialize-timeout.patch` | Small local-stdio guard: the external proxy owns its initialization deadline |
 
 `main.ts` installs the extension and wraps IPC dispatch with a browser-language
 context. The Electron shim reads that context without overwriting settings;
 Desktop still resolves `localeOverride`. No new webview patch is needed for
-status or mobile layout. The timeout patch is the only modified extracted-code
-patch for this feature set.
+status or mobile layout. Desktop `26.901.41123` already keeps local stdio
+initialization pending, so the former fork timeout patch has been removed.
+The extracted-code patches in this branch now come unchanged from upstream.
 
 Each proxy reports states over an authenticated loopback TCP connection created
 by the backend. Its ephemeral port and random token are inherited through
@@ -107,7 +107,7 @@ The fork also carries changes predating these runtime modules:
 | Docker image, platform CI and Compose | Fork-owned files; retain the build/runtime dependency split and non-root user |
 | Base-path support | Validation is isolated in `src/server/base-path.ts`; URL routing still needs integration in `main.ts`, browser `routes.ts`, `shim.ts`, `files.ts` and the PWA manifest |
 | Runtime dependencies | `package.json` and its lockfile include the production/build split and runtime `tslib`; reconcile new upstream dependencies before regenerating the lockfile |
-| Extracted Desktop timeout | One dedicated patch, registered by one line in `scripts/prepare_asar`; regenerate against each Desktop bundle upgrade |
+| Extracted Desktop timeout | Former fork patch removed after the upstream upgrade; an integration test checks that local stdio still waits without rejecting initialization |
 
 Patches are for the extracted, generated Desktop code. Keep small integrations
 in editable upstream TypeScript visible in Git; converting them to install-time
@@ -115,3 +115,8 @@ patches would move the same conflict to patch application and make source review
 harder. Prefer extracting substantial fork behavior into modules while keeping
 the remaining call sites explicit. This reduces merge work, but does not imply
 that future upstream IPC or routing changes will merge without conflicts.
+
+Upstream reconnect handling restores the browser-to-backend IPC connection by
+creating a new renderer and reloading the tab. The Docker proxy separately
+restores its connection to the external app-server, which is hidden behind a
+still-open stdio transport. Its thread-resume barrier remains necessary.

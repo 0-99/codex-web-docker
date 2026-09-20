@@ -78,9 +78,11 @@ addition to these delays. The sequence resets after successful recovery.
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
 `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS=8` make one initial attempt and at most eight
 retries, waiting 5 seconds before the first retry and 15 seconds thereafter.
-The proxy still enforces a timeout on each attempt. A small, local-stdio-only
-Desktop patch lets this proxy own the overall initialization deadline; native
-and remote-control connections retain their upstream timeout behavior.
+The proxy still enforces a timeout on each attempt. Desktop `26.901.41123`
+keeps local stdio initialization pending after its diagnostic timeout, so no
+fork timeout patch is needed. Other transports retain upstream behavior.
+Upstream also reloads browser tabs after a lost browser-to-backend IPC
+connection; external app-server recovery is handled separately by the proxy.
 
 After reconnect, the proxy sends `initialize` and `initialized`, then restores
 threads previously started, resumed or forked through it using `thread/resume`.
