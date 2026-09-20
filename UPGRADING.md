@@ -148,8 +148,8 @@ request and review its checks before merging or creating a release separately.
 
 The earlier audit used common ancestor `8cc728d` and fork baseline `d6c244d`.
 Both that baseline and the runtime feature branch conflicted with upstream
-`0dfdc10` in `src/server/main.ts`. At the user's request, this PR now includes
-that upstream revision as a merge parent, including Desktop `26.901.41123`,
+`0dfdc10` in `src/server/main.ts`. The merge includes that upstream revision
+as a merge parent, including Desktop `26.901.41123`,
 the upstream CLI pin `0.153.3`, and per-tab renderer ownership.
 
 The merge retains our base-path setup while taking upstream's renderer factory,

@@ -157,7 +157,7 @@ security_opt:
   - systempaths=unconfined
 ```
 
-In the user's deployment test, neither `SYS_ADMIN` nor `apparmor=unconfined`
+In the tested deployment, neither `SYS_ADMIN` nor `apparmor=unconfined`
 was required. Apply these options to the **codex-cli/app-server service**;
 the web frontend requires neither option. The optional
 [`examples/app-server-security.compose.yml`](examples/app-server-security.compose.yml)
