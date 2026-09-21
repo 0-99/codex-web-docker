@@ -1,0 +1,54 @@
+--- a/webview/assets/app-primary-6b28e06666ff.js
++++ b/webview/assets/app-primary-6b28e06666ff.js
+@@ -317051,7 +317051,20 @@
+         : null),
+       (t[22] = c),
+       (t[23] = C));
+-  let w;
++  let w = (0, w4.jsx)(Cp.Item, {
++    disabled: !0,
++    children: (0, w4.jsxs)(`span`, {
++      className: `flex w-full items-center justify-between gap-3`,
++      children: [
++        (0, w4.jsx)(`span`, { children: `Web build` }),
++        (0, w4.jsx)(`code`, {
++          className: `select-text font-mono text-xs`,
++          children: window.__ELECTRON_SHIM__?.webBuildRevision ?? `unknown`,
++        }),
++      ],
++    }),
++  });
++  let T;
+   return (
+     t[24] !== n ||
+     t[25] !== S ||
+@@ -317061,14 +317074,14 @@
+     t[29] !== _ ||
+     t[30] !== v ||
+     t[31] !== y
+-      ? ((w = (0, w4.jsxs)(dc, {
++      ? ((T = (0, w4.jsxs)(dc, {
+           align: `start`,
+           contentClassName: `w-80`,
+           open: n,
+           side: `top`,
+           sideOffset: 6,
+           triggerButton: p,
+-          children: [m, h, g, _, v, y, b, S, C],
++          children: [m, h, g, _, v, y, b, S, C, w],
+         })),
+         (t[24] = n),
+         (t[25] = S),
+@@ -317078,9 +317091,9 @@
+         (t[29] = _),
+         (t[30] = v),
+         (t[31] = y),
+-        (t[32] = w))
+-      : (w = t[32]),
+-    w
++        (t[32] = T))
++      : (T = t[32]),
++    T
+   );
+ }
+ function lir() {

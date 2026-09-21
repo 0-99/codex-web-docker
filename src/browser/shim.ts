@@ -110,9 +110,17 @@ type StatsigGateEvaluation = {
   [key: string]: unknown;
 };
 
+type StatsigDynamicConfigEvaluation = {
+  name: string;
+  value: Record<string, unknown>;
+  get: (key: string, fallback?: unknown) => unknown;
+  [key: string]: unknown;
+};
+
 type ElectronShimState = {
   initialRoute?: string;
   initialSidebarState?: boolean;
+  webBuildRevision?: string;
   closeSidebar?: () => void;
   onMemoryNavigationChanged?: (navigation: MemoryNavigationChange) => void;
   overrideAdapter?: {
@@ -120,6 +128,10 @@ type ElectronShimState = {
       evaluation: StatsigGateEvaluation,
       ...args: unknown[]
     ) => StatsigGateEvaluation | null;
+    getDynamicConfigOverride?: (
+      evaluation: StatsigDynamicConfigEvaluation,
+      ...args: unknown[]
+    ) => StatsigDynamicConfigEvaluation | null;
   };
 };
 
@@ -130,6 +142,7 @@ declare global {
 }
 
 declare const __CODEX_APP_VERSION__: string;
+declare const __CODEX_WEB_REVISION__: string;
 
 let requestCounter = 0;
 let socket: WebSocket | null = null;
@@ -377,6 +390,10 @@ const electronShim = (window.__ELECTRON_SHIM__ ??= {});
 const buildFlavor: "prod" | "dev" | "agent" | string = "prod";
 const browserBasePath = getDocumentBasePath();
 
+// This is the revision of the web-wrapper image, not the bundled Desktop app
+// version. It lets an administrator identify the actually deployed frontend.
+electronShim.webBuildRevision = __CODEX_WEB_REVISION__;
+
 window.addEventListener("popstate", () => {
   dispatchNavigateToRoute(
     mapBrowserPathToRoute(window.location.pathname, browserBasePath),
@@ -394,6 +411,26 @@ Object.assign(globalThis, {
 });
 
 electronShim.overrideAdapter = {
+  getDynamicConfigOverride(evaluation) {
+    if (evaluation.name !== "72216192") {
+      return null;
+    }
+
+    // The complete translation catalog ships with the web bundle. Statsig
+    // normally enables it remotely, but an intentionally isolated deployment
+    // has no configuration response and otherwise remains English forever.
+    const value = {
+      ...evaluation.value,
+      enable_i18n: true,
+    };
+    return {
+      ...evaluation,
+      value,
+      get(key, fallback) {
+        return key in value ? value[key] : fallback;
+      },
+    };
+  },
   getGateOverride(evaluation) {
     if (evaluation.name === "2911712394") {
       return {

@@ -74,6 +74,7 @@ addition to these delays. The sequence resets after successful recovery.
 | `CODEX_APP_SERVER_RESUME_TIMEOUT_MS`        | `30000`                       | Timeout for each thread restoration                                                 |
 | `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker  | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy)           |
 | `CODEX_WEB_USER_DATA_DIR`                   | `/home/node/.codex` in Docker | Writable Electron user-data directory for web settings, state and artifact sessions |
+| `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`         | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
 | `CODEX_WEB_ELECTRON_DEBUG`                  | unset                         | Set to `1` for verbose Electron-stub calls                                          |
 
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
@@ -148,8 +149,28 @@ Persist the external app-server's Codex home separately as well: that is where
 its authentication and thread history live. Match its container's home path
 and user according to that image. Do not substitute the web-side volume for
 app-server history or share the same database directory between processes.
+
+## Desktop-only app MCP
+
+The upstream desktop bundle tries to attach its internal `codex_app` MCP server
+whenever it believes it launched a local CLI. Here the apparent local CLI is
+only a relay to an external app-server. The image therefore sets
+`CODEX_WEB_DISABLE_INTERNAL_APP_MCP=1`. It prevents an upstream configuration
+compatibility error (`invalid transport in mcp_servers.codex_app`) from blocking
+new and resumed chats. The desktop-only tools provided by that MCP server are
+not available through the web wrapper.
+
+Set the variable to `0` only when the external app-server is confirmed to
+support the matching upstream desktop bundle's internal MCP configuration.
 Existing bind mounts and volumes with `volume-nocopy` keep their existing host
 ownership; image initialization does not change arbitrary host directories.
+
+## Visible web build revision
+
+Open the Help menu in the sidebar to see **Web build**. It shows the Git commit
+used to build the running `codex-web` image. This identifies the web frontend
+itself, independently of the bundled Desktop version and the external Codex
+app-server version.
 
 ## Separate codex-cli container sandbox
 

@@ -35,6 +35,7 @@ patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-ele
 patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-prosemirror-inputmode.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-use-atfs-for-local-files.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-statsig-override-adapter.patch
+patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-build-info.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-prompt-search-param.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/sentry-disable-shell.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/sentry-disable-webview.patch
@@ -42,4 +43,5 @@ patch --batch --forward --strip 1 --directory scratch/asar < patches/preload-dis
 patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-safe-header-left.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-json-rpc.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-browser-windows.patch
+patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-disable-internal-mcp.patch
 rm -rf scratch/asar/node_modules/better-sqlite3

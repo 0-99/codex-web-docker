@@ -20,6 +20,9 @@ RUN apk add --no-cache \
 WORKDIR /opt/codex-web
 COPY . .
 
+ARG SOURCE_REVISION=unknown
+ENV VITE_CODEX_WEB_REVISION=$SOURCE_REVISION
+
 RUN npm ci --ignore-scripts --no-audit --no-fund \
     && npm rebuild sharp \
     && npm run test:docker-proxy \
@@ -67,6 +70,7 @@ ENV NODE_ENV=production \
     HOST=0.0.0.0 \
     PORT=8214 \
     CODEX_WEB_USER_DATA_DIR=/home/node/.codex \
+    CODEX_WEB_DISABLE_INTERNAL_APP_MCP=1 \
     CODEX_WEB_BASE_PATH=/ \
     CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION=terminate-parent \
     CODEX_CLI_PATH=/opt/codex-web/docker/codex-app-server-proxy.mjs
