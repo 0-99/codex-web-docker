@@ -66,6 +66,7 @@ ENV NODE_ENV=production \
     HOME=/home/node \
     HOST=0.0.0.0 \
     PORT=8214 \
+    CODEX_WEB_USER_DATA_DIR=/home/node/.codex \
     CODEX_WEB_BASE_PATH=/ \
     CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION=terminate-parent \
     CODEX_CLI_PATH=/opt/codex-web/docker/codex-app-server-proxy.mjs

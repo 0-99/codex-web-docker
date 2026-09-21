@@ -49,6 +49,9 @@ services:
       - ${WORKSPACE_PATH:-./workspace}:/workspace
 
     networks:
+      # Core operation through the external app-server does not require direct
+      # internet access from this container. On an internal-only network,
+      # optional Desktop cloud features are unavailable; see DOCKER.md.
       - codex
 
 networks:

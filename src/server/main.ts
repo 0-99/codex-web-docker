@@ -455,7 +455,7 @@ export async function startIpcBridgeServer(
     .replace('<base href="/" />', `<base href="${escapedBasePath}" />`)
     .replace(
       '<link rel="manifest" href="/manifest.json" />',
-      `<link rel="manifest" href="${escapedBasePath}manifest.json" />`,
+      `<link rel="manifest" href="${escapedBasePath}manifest.json" crossorigin="use-credentials" />`,
     );
 
   indexHtml = await installWebRuntime(app, basePath, indexHtml);
@@ -562,15 +562,17 @@ export async function startIpcBridgeServer(
   };
 
   websocketServer.on("connection", (socket, request) => {
-    const locale = new URL(request.url ?? "/", "http://localhost")
-      .searchParams.get("locale");
+    const locale = new URL(
+      request.url ?? "/",
+      "http://localhost",
+    ).searchParams.get("locale");
     const languages = normalizeLanguages(
       locale ?? request.headers["accept-language"] ?? "",
     );
     let rendererWindow: RendererWindow | undefined;
     // Each tab is a real registered app view, with its own IPC client and ownership.
-    const rendererReady = rendererWindowFactory
-      .then(async (createWindow) => {
+    const rendererReady = withBrowserLanguages(languages, () =>
+      rendererWindowFactory.then(async (createWindow) => {
         if (socket.readyState !== WebSocket.OPEN) return undefined;
         const window = await createWindow();
         if (socket.readyState !== WebSocket.OPEN) {
@@ -580,12 +582,12 @@ export async function startIpcBridgeServer(
         rendererWindow = window;
         rendererSockets.set(window.webContents.id, socket);
         return window;
-      })
-      .catch((error) => {
-        console.error("[ipc-bridge] failed to create renderer window", error);
-        socket.close(1011, "Renderer initialization failed");
-        return undefined;
-      });
+      }),
+    ).catch((error) => {
+      console.error("[ipc-bridge] failed to create renderer window", error);
+      socket.close(1011, "Renderer initialization failed");
+      return undefined;
+    });
 
     const messagePorts = new Map<string, WebSocketMessagePort>();
     const dispatchPostMessage = (
@@ -619,126 +621,133 @@ export async function startIpcBridgeServer(
       }
     });
 
-    socket.on("message", (rawData) => withBrowserLanguages(languages, async () => {
-      const window = await rendererReady;
-      if (!window || socket.readyState !== WebSocket.OPEN) return;
-      let message: RendererToMainMessage;
-      try {
-        message = JSON.parse(String(rawData)) as RendererToMainMessage;
-      } catch (error) {
-        console.error("[ipc-bridge] invalid JSON payload", error);
-        return;
-      }
-
-      if (message.type === "ipc-renderer-send") {
-        bridgeState.handleRendererSend?.(
-          message.channel,
-          message.args,
-          window.id,
-        );
-        return;
-      }
-
-      if (message.type === "ipc-renderer-post-message") {
-        if (new Set(message.portIds).size !== message.portIds.length) {
-          console.error("[ipc-bridge] duplicate transferred MessagePort id");
+    socket.on("message", (rawData) =>
+      withBrowserLanguages(languages, async () => {
+        const window = await rendererReady;
+        if (!window || socket.readyState !== WebSocket.OPEN) return;
+        let message: RendererToMainMessage;
+        try {
+          message = JSON.parse(String(rawData)) as RendererToMainMessage;
+        } catch (error) {
+          console.error("[ipc-bridge] invalid JSON payload", error);
           return;
         }
 
-        const ports = message.portIds.map((portId) => {
-          const existingPort = messagePorts.get(portId);
-          if (existingPort) {
-            existingPort.disconnect();
-          }
-          const port = new WebSocketMessagePort(
-            portId,
-            (message) => {
-              if (socket.readyState === WebSocket.OPEN) {
-                socket.send(JSON.stringify(message));
-              }
-            },
-            () => messagePorts.delete(portId),
+        if (message.type === "ipc-renderer-send") {
+          bridgeState.handleRendererSend?.(
+            message.channel,
+            message.args,
+            window.id,
           );
-          messagePorts.set(portId, port);
-          return port;
-        });
+          return;
+        }
 
-        dispatchPostMessage(message.channel, message.message, ports, window.id);
-        return;
-      }
+        if (message.type === "ipc-renderer-post-message") {
+          if (new Set(message.portIds).size !== message.portIds.length) {
+            console.error("[ipc-bridge] duplicate transferred MessagePort id");
+            return;
+          }
 
-      if (message.type === "message-port-message") {
-        messagePorts.get(message.portId)?.receiveMessage(message.data);
-        return;
-      }
-
-      if (message.type === "message-port-close") {
-        messagePorts.get(message.portId)?.disconnect();
-        return;
-      }
-
-      if (message.type === "workspace-directory-entries-request") {
-        const { requestId } = message;
-        getWorkspaceDirectoryEntries(message)
-          .then((result) => {
-            const payload: MainToRendererMessage = {
-              type: "workspace-directory-entries-result",
-              requestId,
-              ok: true,
-              result,
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(payload));
+          const ports = message.portIds.map((portId) => {
+            const existingPort = messagePorts.get(portId);
+            if (existingPort) {
+              existingPort.disconnect();
             }
-          })
-          .catch((error) => {
-            const payload: MainToRendererMessage = {
-              type: "workspace-directory-entries-result",
-              requestId,
-              ok: false,
-              errorMessage: errorMessage(error),
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(payload));
-            }
+            const port = new WebSocketMessagePort(
+              portId,
+              (message) => {
+                if (socket.readyState === WebSocket.OPEN) {
+                  socket.send(JSON.stringify(message));
+                }
+              },
+              () => messagePorts.delete(portId),
+            );
+            messagePorts.set(portId, port);
+            return port;
           });
-        return;
-      }
 
-      if (message.type === "ipc-renderer-invoke") {
-        const { channel, requestId, args } = message;
-        Promise.resolve(
-          bridgeState.handleRendererInvoke?.(channel, args, window.id) ??
-            Promise.reject(
-              new Error(
-                `[ipc-bridge] no ipcMain.handle for channel ${channel}`,
+          dispatchPostMessage(
+            message.channel,
+            message.message,
+            ports,
+            window.id,
+          );
+          return;
+        }
+
+        if (message.type === "message-port-message") {
+          messagePorts.get(message.portId)?.receiveMessage(message.data);
+          return;
+        }
+
+        if (message.type === "message-port-close") {
+          messagePorts.get(message.portId)?.disconnect();
+          return;
+        }
+
+        if (message.type === "workspace-directory-entries-request") {
+          const { requestId } = message;
+          getWorkspaceDirectoryEntries(message)
+            .then((result) => {
+              const payload: MainToRendererMessage = {
+                type: "workspace-directory-entries-result",
+                requestId,
+                ok: true,
+                result,
+              };
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(payload));
+              }
+            })
+            .catch((error) => {
+              const payload: MainToRendererMessage = {
+                type: "workspace-directory-entries-result",
+                requestId,
+                ok: false,
+                errorMessage: errorMessage(error),
+              };
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(payload));
+              }
+            });
+          return;
+        }
+
+        if (message.type === "ipc-renderer-invoke") {
+          const { channel, requestId, args } = message;
+          Promise.resolve(
+            bridgeState.handleRendererInvoke?.(channel, args, window.id) ??
+              Promise.reject(
+                new Error(
+                  `[ipc-bridge] no ipcMain.handle for channel ${channel}`,
+                ),
               ),
-            ),
-        )
-          .then((result) => {
-            const payload: MainToRendererMessage = {
-              type: "ipc-renderer-invoke-result",
-              requestId,
-              ok: true,
-              result,
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(payload));
-            }
-          })
-          .catch((error) => {
-            const payload: MainToRendererMessage = {
-              type: "ipc-renderer-invoke-result",
-              requestId,
-              ok: false,
-              errorMessage: errorMessage(error),
-            };
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.send(JSON.stringify(payload));
-            }
-          });
-      }
-    }));
+          )
+            .then((result) => {
+              const payload: MainToRendererMessage = {
+                type: "ipc-renderer-invoke-result",
+                requestId,
+                ok: true,
+                result,
+              };
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(payload));
+              }
+            })
+            .catch((error) => {
+              const payload: MainToRendererMessage = {
+                type: "ipc-renderer-invoke-result",
+                requestId,
+                ok: false,
+                errorMessage: errorMessage(error),
+              };
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.send(JSON.stringify(payload));
+              }
+            });
+        }
+      }),
+    );
   });
 
   await app.listen({ host: options.host, port: options.port });

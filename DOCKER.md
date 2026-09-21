@@ -65,15 +65,16 @@ are **10 s, 10 s, 20 s, 30 s, then 30 s repeatedly**, without an attempt limit.
 Waits begin after a failed attempt; connection/initialization timeouts are in
 addition to these delays. The sequence resets after successful recovery.
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `CODEX_APP_SERVER_MAX_PAYLOAD` | `104857600` | Maximum WebSocket message size in bytes |
-| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS` | `10000` | Timeout for each connection and `initialize` attempt |
-| `CODEX_APP_SERVER_RETRY_DELAYS_MS` | `10000,10000,20000,30000` | Comma-separated retry waits in milliseconds; repeat the last value |
-| `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS` | `0` | Retries after the first attempt; `0` means unlimited |
-| `CODEX_APP_SERVER_RESUME_TIMEOUT_MS` | `30000` | Timeout for each thread restoration |
-| `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy) |
-| `CODEX_WEB_ELECTRON_DEBUG` | unset | Set to `1` for verbose Electron-stub calls |
+| Variable                                    | Default                       | Purpose                                                                             |
+| ------------------------------------------- | ----------------------------- | ----------------------------------------------------------------------------------- |
+| `CODEX_APP_SERVER_MAX_PAYLOAD`              | `104857600`                   | Maximum WebSocket message size in bytes                                             |
+| `CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS`     | `10000`                       | Timeout for each connection and `initialize` attempt                                |
+| `CODEX_APP_SERVER_RETRY_DELAYS_MS`          | `10000,10000,20000,30000`     | Comma-separated retry waits in milliseconds; repeat the last value                  |
+| `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS`       | `0`                           | Retries after the first attempt; `0` means unlimited                                |
+| `CODEX_APP_SERVER_RESUME_TIMEOUT_MS`        | `30000`                       | Timeout for each thread restoration                                                 |
+| `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker  | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy)           |
+| `CODEX_WEB_USER_DATA_DIR`                   | `/home/node/.codex` in Docker | Writable Electron user-data directory for web settings, state and artifact sessions |
+| `CODEX_WEB_ELECTRON_DEBUG`                  | unset                         | Set to `1` for verbose Electron-stub calls                                          |
 
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
 `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS=8` make one initial attempt and at most eight
@@ -105,13 +106,13 @@ may be lost permanently.
 Existing deployments explicitly setting any of the following variables retain
 the previous finite two-phase strategy and receive a deprecation warning:
 
-| Deprecated variable | Legacy default |
-| --- | --- |
-| `CODEX_APP_SERVER_RECONNECT_ATTEMPTS` | `5` |
-| `CODEX_APP_SERVER_RECONNECT_DELAY_MS` | `30000` |
-| `CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS` | `10` |
-| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS` | `300000` |
-| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS` | `300000` |
+| Deprecated variable                                   | Legacy default |
+| ----------------------------------------------------- | -------------- |
+| `CODEX_APP_SERVER_RECONNECT_ATTEMPTS`                 | `5`            |
+| `CODEX_APP_SERVER_RECONNECT_DELAY_MS`                 | `30000`        |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS`         | `10`           |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INITIAL_DELAY_MS` | `300000`       |
+| `CODEX_APP_SERVER_RECONNECT_BACKOFF_INCREMENT_MS`     | `300000`       |
 
 This means five retries every 30 seconds, followed by ten retries with waits of
 5, 10, through 50 minutes. A phase's attempt count of `0` disables that phase.
@@ -122,10 +123,11 @@ switching to the new defaults; the updated Compose example uses the new names.
 
 Connection failures, scheduled attempts, successful reconnections and thread
 restore failures remain in the container log. Routine Electron-stub tracing is
-silent unless debug logging is enabled. Browser/system locale detection is
-scoped to each browser connection. Upstream's saved `localeOverride` still takes
-precedence; `en-US` is only the final fallback. The connection panel currently
-has German and English text selected from the browser language.
+silent unless debug logging is enabled. Browser/system locale detection,
+including initial window creation, is scoped to each browser connection.
+Upstream's saved `localeOverride` still takes precedence; `en-US` is only the
+final fallback. The connection panel currently has German and English text
+selected from the browser language.
 
 ## Persistence and fresh volumes
 
@@ -133,7 +135,9 @@ The Compose example mounts a named volume at `/home/node/.codex` for web-side
 settings and local state. The image creates this directory with UID/GID
 `1000:1000` before switching to `USER node`. Docker copies the directory's
 ownership into a fresh, empty named volume, so it is writable on first startup
-without a root entrypoint or a manual `chown`.
+without a root entrypoint or a manual `chown`. The Electron compatibility layer
+uses this path for `userData`, so artifact sessions and state files are no
+longer written below the read-only application directory `/opt/codex-web`.
 
 ```yaml
 volumes:
@@ -186,6 +190,10 @@ WebSocket upgrades must remain enabled. Direct access through the example's
 local port uses the same path, for example
 `http://127.0.0.1:8214/my/example/subdir/`.
 
+The manifest link uses `crossorigin="use-credentials"`. This is harmless on an
+unprotected installation and lets a reverse proxy protected by Authelia or any
+other cookie-based authentication gateway authorize the manifest request.
+
 ## Compose and Portainer
 
 When the app-server runs in another container on the same Docker host, create
@@ -197,6 +205,11 @@ docker network create --driver bridge codex
 
 This keeps both containers off the host network while providing automatic DNS
 resolution between them. Docker's shared default `bridge` network is not used.
+General internet access from `codex-web` is not required for the core workflow
+through an external app-server. On an internal-only network, optional Desktop
+requests for feature flags, account metadata, usage and cloud tasks may log
+`sa_server_request_failed` and return `/wham/...` status 500; the app-server
+container remains responsible for Codex/OpenAI connectivity.
 
 Then set `WORKSPACE_PATH` and, if needed, `CODEX_APP_SERVER_URL`, and deploy
 [`examples/docker-compose.yml`](examples/docker-compose.yml). The app-server

@@ -34,7 +34,9 @@ test(
       { startMainApp: false },
     );
     t.after(() => app.close());
+    const rendererLocales = [];
     globalThis.__codexElectronIpcBridge.setRendererWindowFactory(async () => {
+      rendererLocales.push(electron.app.getLocale());
       await delay(10);
       return new electron.BrowserWindow({ show: false });
     });
@@ -74,6 +76,7 @@ test(
       languages: ["de-DE", "en-US"],
     });
     assert.equal(fr.locale, "fr-FR");
+    assert.deepEqual(rendererLocales.sort(), ["de-DE", "fr-FR"]);
   },
 );
 test("Electron tracing is silent by default and explicitly opt-in", () => {
