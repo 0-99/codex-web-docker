@@ -1,3 +1,5 @@
+import os from "node:os";
+import path from "node:path";
 import { preferredLanguages } from "./locale";
 
 type StubFunction = (...args: unknown[]) => unknown;
@@ -288,6 +290,61 @@ function createIpcMainStub(): {
 let appReady = false;
 const commandLineSwitches = new Map<string, string>();
 const commandLineArguments: string[] = [];
+const appPathOverrides = new Map<string, string>();
+
+function defaultAppDataPath(): string {
+  if (process.platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support");
+  }
+  if (process.platform === "win32") {
+    return process.env.APPDATA || path.join(os.homedir(), "AppData", "Roaming");
+  }
+  return process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config");
+}
+
+function defaultAppPath(name: string): string {
+  const home = os.homedir();
+  const appData = defaultAppDataPath();
+  const userData = path.resolve(
+    process.env.CODEX_WEB_USER_DATA_DIR || path.join(appData, "Codex"),
+  );
+  switch (name) {
+    case "home":
+      return home;
+    case "appData":
+      return appData;
+    case "userData":
+      return userData;
+    case "sessionData":
+      return userData;
+    case "temp":
+      return os.tmpdir();
+    case "exe":
+      return process.execPath;
+    case "module":
+      return path.dirname(process.execPath);
+    case "desktop":
+      return path.join(home, "Desktop");
+    case "documents":
+      return path.join(home, "Documents");
+    case "downloads":
+      return path.join(home, "Downloads");
+    case "music":
+      return path.join(home, "Music");
+    case "pictures":
+      return path.join(home, "Pictures");
+    case "videos":
+      return path.join(home, "Videos");
+    case "recent":
+      return path.join(home, "Recent");
+    case "logs":
+      return path.join(userData, "logs");
+    case "crashDumps":
+      return path.join(userData, "Crashpad");
+    default:
+      return path.join(userData, name);
+  }
+}
 
 const appBase = {
   ...createEmitterStub("app"),
@@ -314,7 +371,7 @@ const appBase = {
   },
   getPath(name: string): string {
     log("app.getPath", [name]);
-    return process.cwd();
+    return appPathOverrides.get(name) ?? defaultAppPath(name);
   },
   getAppMetrics(): unknown[] {
     log("app.getAppMetrics", []);
@@ -333,6 +390,7 @@ const appBase = {
   },
   setPath(name: string, value: string): void {
     log("app.setPath", [name, value]);
+    appPathOverrides.set(name, path.resolve(value));
   },
   setAppUserModelId(value: string): void {
     log("app.setAppUserModelId", [value]);

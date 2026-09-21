@@ -41,7 +41,7 @@ test("serves the complete application below a configured base path", async (t) =
   assert.match(indexHtml, /<base href="\/my\/example\/subdir\/" \/>/);
   assert.match(
     indexHtml,
-    /<link rel="manifest" href="\/my\/example\/subdir\/manifest\.json" \/>/,
+    /<link rel="manifest" href="\/my\/example\/subdir\/manifest\.json" crossorigin="use-credentials" \/>/,
   );
 
   assert.equal((await fetch(`${applicationUrl}assets/preload.js`)).status, 200);
