@@ -1,0 +1,16 @@
+--- a/.vite/build/main-C5K7o1Hr.js
++++ b/.vite/build/main-C5K7o1Hr.js
+@@ -135988,7 +135988,12 @@
+     repoRoot: e.repoRoot,
+     resourcesPath: e.resourcesPath,
+     defaultOriginator: e.defaultOriginator,
+-    getConfigOverrides: () => tk(e),
++    // codex_app is a Desktop-only MCP integration. In this web wrapper the
++    // apparent local CLI is a relay to an external app-server; passing this
++    // integration through creates a configuration unsupported by some CLI
++    // versions and prevents every chat from starting.
++    getConfigOverrides: () =>
++      process.env.CODEX_WEB_DISABLE_INTERNAL_APP_MCP === `1` ? [] : tk(e),
+   });
+ }
+ function F5(e) {
