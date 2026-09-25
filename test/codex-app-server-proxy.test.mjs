@@ -154,10 +154,10 @@ test("does not pass the Desktop-only codex_app override to an external app-serve
       cwd: "/workspace",
       config: {
         "mcp_servers.codex_app.transport": "unsupported",
-        "mcp_servers.home_assistant.url": "http://example.invalid/mcp",
+        "mcp_servers.alpha.url": "http://example.invalid/alpha",
         mcp_servers: {
+          beta: { url: "http://example.invalid/beta" },
           codex_app: { transport: "unsupported" },
-          portainer: { url: "http://example.invalid/portainer" },
         },
         model_reasoning_effort: "high",
       },
@@ -170,9 +170,9 @@ test("does not pass the Desktop-only codex_app override to an external app-serve
     params: {
       ...request.params,
       config: {
-        "mcp_servers.home_assistant.url": "http://example.invalid/mcp",
+        "mcp_servers.alpha.url": "http://example.invalid/alpha",
         mcp_servers: {
-          portainer: { url: "http://example.invalid/portainer" },
+          beta: { url: "http://example.invalid/beta" },
         },
         model_reasoning_effort: "high",
       },
