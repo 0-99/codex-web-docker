@@ -127,8 +127,10 @@ restore failures remain in the container log. Routine Electron-stub tracing is
 silent unless debug logging is enabled. Browser/system locale detection,
 including initial window creation, is scoped to each browser connection.
 Upstream's saved `localeOverride` still takes precedence; `en-US` is only the
-final fallback. The connection panel currently has German and English text
-selected from the browser language.
+final fallback. The build enables the bundled translations when Statsig is
+unreachable, so a selected non-English locale also applies to the Desktop UI.
+The connection panel currently has German and English text selected from the
+browser language.
 
 ## Persistence and fresh volumes
 
