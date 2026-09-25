@@ -44,4 +44,5 @@ patch --batch --forward --strip 1 --directory scratch/asar < patches/webview-saf
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-json-rpc.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-browser-windows.patch
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-disable-internal-mcp.patch
+node ./scripts/enable_i18n.mjs scratch/asar/webview/assets
 rm -rf scratch/asar/node_modules/better-sqlite3
