@@ -131,6 +131,84 @@ test("bridges JSONL stdio to a WebSocket app-server", async (t) => {
   await assertBridge(t, `ws://127.0.0.1:${address.port}`);
 });
 
+test("does not pass the Desktop-only codex_app override to an external app-server", async (t) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  echoConnections(server);
+  await once(server, "listening");
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const child = spawnProxy(t, `ws://127.0.0.1:${address.port}`, {
+    CODEX_WEB_DISABLE_INTERNAL_APP_MCP: "1",
+  });
+  const output = readline.createInterface({ input: child.stdout });
+  child.stdin.write(
+    `${JSON.stringify({ id: "init", method: "initialize" })}\n`,
+  );
+  await once(output, "line");
+
+  const request = {
+    id: 1,
+    method: "thread/start",
+    params: {
+      cwd: "/workspace",
+      config: {
+        "mcp_servers.codex_app.transport": "unsupported",
+        "mcp_servers.home_assistant.url": "http://example.invalid/mcp",
+        mcp_servers: {
+          codex_app: { transport: "unsupported" },
+          portainer: { url: "http://example.invalid/portainer" },
+        },
+        model_reasoning_effort: "high",
+      },
+    },
+  };
+  const response = once(output, "line");
+  child.stdin.write(`${JSON.stringify(request)}\n`);
+  assert.deepEqual(JSON.parse((await response)[0]), {
+    ...request,
+    params: {
+      ...request.params,
+      config: {
+        "mcp_servers.home_assistant.url": "http://example.invalid/mcp",
+        mcp_servers: {
+          portainer: { url: "http://example.invalid/portainer" },
+        },
+        model_reasoning_effort: "high",
+      },
+    },
+  });
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
+});
+
+test("leaves explicit Desktop MCP overrides intact when filtering is disabled", async (t) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  echoConnections(server);
+  await once(server, "listening");
+  const address = server.address();
+  assert.equal(typeof address, "object");
+  const child = spawnProxy(t, `ws://127.0.0.1:${address.port}`, {
+    CODEX_WEB_DISABLE_INTERNAL_APP_MCP: "0",
+  });
+  const output = readline.createInterface({ input: child.stdout });
+  child.stdin.write(
+    `${JSON.stringify({ id: "init", method: "initialize" })}\n`,
+  );
+  await once(output, "line");
+  const request = JSON.stringify({
+    id: 1,
+    method: "thread/start",
+    params: { config: { "mcp_servers.codex_app.transport": "custom" } },
+  });
+  const response = once(output, "line");
+  child.stdin.write(`${request}\n`);
+  assert.equal((await response)[0], request);
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
+});
+
 test("reconnects after the app-server becomes available", async (t) => {
   const port = await unusedPort();
   const child = spawnProxy(t, `ws://127.0.0.1:${port}`, {
@@ -296,22 +374,31 @@ test("can terminate its parent after reconnect attempts are exhausted", async (t
   assert.equal(signal, "SIGTERM");
 });
 
-test("unlimited startup retries continue beyond the legacy attempt count", { timeout: 5000 }, async (t) => {
-  const port = await unusedPort();
-  const child = spawnProxy(t, `ws://127.0.0.1:${port}`, {
-    CODEX_APP_SERVER_RETRY_DELAYS_MS: "10",
-    CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
-  });
-  const stderr = capture(child.stderr);
-  const output = readline.createInterface({ input: child.stdout });
-  const response = once(output, "line");
-  child.stdin.write(JSON.stringify({ id: "init", method: "initialize" }) + "\n");
-  await stderr.waitFor(/\(attempt 20\)/);
-  assert.equal(child.exitCode, null);
-  const server = new WebSocketServer({ host: "127.0.0.1", port });
-  const connections = echoConnections(server);
-  t.after(() => { for (const socket of connections) socket.terminate(); server.close(); });
-  assert.equal(JSON.parse((await response)[0]).id, "init");
-  child.stdin.end();
-  assert.equal((await once(child, "exit"))[0], 0);
-});
+test(
+  "unlimited startup retries continue beyond the legacy attempt count",
+  { timeout: 5000 },
+  async (t) => {
+    const port = await unusedPort();
+    const child = spawnProxy(t, `ws://127.0.0.1:${port}`, {
+      CODEX_APP_SERVER_RETRY_DELAYS_MS: "10",
+      CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "100",
+    });
+    const stderr = capture(child.stderr);
+    const output = readline.createInterface({ input: child.stdout });
+    const response = once(output, "line");
+    child.stdin.write(
+      JSON.stringify({ id: "init", method: "initialize" }) + "\n",
+    );
+    await stderr.waitFor(/\(attempt 20\)/);
+    assert.equal(child.exitCode, null);
+    const server = new WebSocketServer({ host: "127.0.0.1", port });
+    const connections = echoConnections(server);
+    t.after(() => {
+      for (const socket of connections) socket.terminate();
+      server.close();
+    });
+    assert.equal(JSON.parse((await response)[0]).id, "init");
+    child.stdin.end();
+    assert.equal((await once(child, "exit"))[0], 0);
+  },
+);
