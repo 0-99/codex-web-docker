@@ -160,6 +160,11 @@ compatibility error (`invalid transport in mcp_servers.codex_app`) from blocking
 new and resumed chats. The desktop-only tools provided by that MCP server are
 not available through the web wrapper.
 
+The relay also removes a `mcp_servers.codex_app` override from thread requests
+before they reach an external app-server. This covers overrides supplied by the
+Desktop UI or a restored web thread without changing the CLI's persisted
+`config.toml` or other MCP servers. The relay reports when it removes one.
+
 Set the variable to `0` only when the external app-server is confirmed to
 support the matching upstream desktop bundle's internal MCP configuration.
 Existing bind mounts and volumes with `volume-nocopy` keep their existing host

@@ -121,6 +121,41 @@ function parse(message) {
     return null;
   }
 }
+function withoutDesktopAppMcp(message) {
+  if (
+    process.env.CODEX_WEB_DISABLE_INTERNAL_APP_MCP !== "1" ||
+    !["thread/start", "thread/resume", "thread/fork", "turn/start"].includes(
+      message?.method,
+    ) ||
+    !message.params?.config ||
+    typeof message.params.config !== "object" ||
+    Array.isArray(message.params.config)
+  )
+    return message;
+
+  const config = message.params.config;
+  const dottedKeys = Object.keys(config).filter(
+    (key) =>
+      key === "mcp_servers.codex_app" ||
+      key.startsWith("mcp_servers.codex_app."),
+  );
+  const servers = config.mcp_servers;
+  const hasNestedServer =
+    servers &&
+    typeof servers === "object" &&
+    !Array.isArray(servers) &&
+    Object.hasOwn(servers, "codex_app");
+  if (!dottedKeys.length && !hasNestedServer) return message;
+
+  const filtered = { ...config };
+  for (const key of dottedKeys) delete filtered[key];
+  if (hasNestedServer) {
+    filtered.mcp_servers = { ...servers };
+    delete filtered.mcp_servers.codex_app;
+  }
+  log("removed Desktop-only codex_app MCP override from thread request");
+  return { ...message, params: { ...message.params, config: filtered } };
+}
 function isRequest(message) {
   return (
     message &&
@@ -279,7 +314,9 @@ function forward({ raw, parsed }) {
   socket.send(raw);
 }
 function receiveInput(raw) {
-  const parsed = parse(raw);
+  const original = parse(raw);
+  const parsed = withoutDesktopAppMcp(original);
+  if (parsed !== original) raw = JSON.stringify(parsed);
   if (parsed?.method === "initialize" && isRequest(parsed)) {
     initializeRequest = { id: parsed.id, raw };
     startInitialize?.();
