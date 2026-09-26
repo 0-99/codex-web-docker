@@ -41,6 +41,7 @@ test(
     <style>
       /* Upstream's viewport rule plus the chat's flex/scroll structure. */
       body { margin: 0; height: 100vh; } #root { height: 100vh; }
+      .zoom-adjusted-viewport { height: calc(100vh / var(--codex-window-zoom, 1)); zoom: var(--codex-window-zoom, 1); }
       .main-surface { height: 100%; display: flex; flex-direction: column; }
       .startup-loader { height: 100%; display: grid; place-items: center; }
       .messages { flex: 1; min-height: 0; overflow: auto; }
@@ -85,7 +86,7 @@ test(
       .waitFor();
     await page.evaluate(() => {
       document.querySelector("#root").innerHTML =
-        '<main class="main-surface"><header>Codex</header><div class="messages"><div style="height:2000px">Conversation</div></div><textarea aria-label="Message"></textarea></main>';
+        '<div class="zoom-adjusted-viewport"><main class="main-surface"><header>Codex</header><div class="messages"><div style="height:2000px">Conversation</div></div><textarea aria-label="Message"></textarea></main></div>';
     });
     await page.locator("#codex-web-status").waitFor({ state: "hidden" });
     const composer = page.getByRole("textbox");
@@ -101,6 +102,26 @@ test(
       assert.equal(await composer.inputValue(), "Unsent draft");
     }
     await assertComposerVisible();
+    // On Android the browser toolbar can shrink the visual viewport without
+    // changing the 100vh layout viewport. A Desktop-shell wrapper must follow
+    // the same height as #root, or menus and the composer end up below it.
+    await page.evaluate(() =>
+      document.documentElement.style.setProperty(
+        "--codex-web-viewport-height",
+        "600px",
+      ),
+    );
+    await page.waitForFunction(
+      () =>
+        Math.abs(
+          document
+            .querySelector(".zoom-adjusted-viewport")
+            .getBoundingClientRect().bottom - 600,
+        ) < 1,
+    );
+    const clippedBounds = await composer.boundingBox();
+    assert.ok(clippedBounds.y + clippedBounds.height <= 601);
+    await page.evaluate(() => window.dispatchEvent(new Event("resize")));
     // Browser toolbar/orientation changes and keyboard-sized visible area.
     await page.setViewportSize({ width: 393, height: 380 });
     await page.waitForFunction(
