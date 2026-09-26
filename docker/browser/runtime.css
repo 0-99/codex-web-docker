@@ -13,6 +13,13 @@
     box-sizing: border-box;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+  /* The Desktop shell has its own 100vh wrapper inside #root. Keep it in
+     sync with the visual viewport too, including its Electron zoom factor. */
+  .zoom-adjusted-viewport {
+    height: calc(
+      var(--codex-web-viewport-height, 100dvh) / var(--codex-window-zoom, 1)
+    ) !important;
+  }
   #root > *,
   .main-surface {
     min-height: 0;
