@@ -50,6 +50,21 @@ volumes:
   - codex-app-server-socket:/run/codex
 ```
 
+### Mobile Connect pairing
+
+Open **Settings → Connections → Add connection** in the web UI. If the
+bundled Desktop dialog cannot check security requirements, the fork offers
+**Generate pairing code** in that dialog. Clicking it asks the existing
+app-server to enable ephemeral remote control and create a short-lived manual
+code; enter the code in ChatGPT Connect on the phone. No second app-server or
+startup `--remote-control` option is needed. Existing paired connections
+continue to appear in the Desktop connection list.
+
+This fallback is available with `unix:///` app-server endpoints. The pairing
+request is same-origin only, and the code is returned solely to the requesting
+web page. Protect the web UI with your usual proxy authentication because its
+users can already operate the connected Codex session.
+
 ## Startup, reconnect and thread recovery
 
 The web backend starts even while the external app-server is unavailable. Its
@@ -74,7 +89,7 @@ addition to these delays. The sequence resets after successful recovery.
 | `CODEX_APP_SERVER_RESUME_TIMEOUT_MS`        | `30000`                       | Timeout for each thread restoration                                                 |
 | `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker  | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy)           |
 | `CODEX_WEB_USER_DATA_DIR`                   | `/home/node/.codex` in Docker | Writable Electron user-data directory for web settings, state and artifact sessions |
-| `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`         | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
+| `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`        | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
 | `CODEX_WEB_ELECTRON_DEBUG`                  | unset                         | Set to `1` for verbose Electron-stub calls                                          |
 
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
