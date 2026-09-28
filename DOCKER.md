@@ -50,6 +50,41 @@ volumes:
   - codex-app-server-socket:/run/codex
 ```
 
+## ChatGPT mobile Remote pairing (experimental)
+
+The external app-server can also serve a paired ChatGPT mobile client. With a
+Codex CLI version that supports `remoteControl/*` (tested manually with 0.155.1),
+start **the same app-server process** with remote control enabled:
+
+```sh
+codex app-server --remote-control --listen unix:///run/codex/app-server.sock
+```
+
+For an existing Compose deployment, add `--remote-control` to the external
+`codex-cli` service's `command` before restarting it. Keep the same socket,
+`CODEX_HOME` and workspace mounts. Do not run `codex remote-control start` for
+this setup: that command starts another managed app-server, while codex-web
+continues to use the original socket. The app-server needs outbound access to
+OpenAI's remote-control service; no inbound app-server port is needed.
+
+From the **codex-web container console**, generate a short-lived manual code:
+
+```sh
+node /opt/codex-web/docker/remote-control-pair.mjs
+```
+
+Enter the code in ChatGPT on the phone under **Remote > Connect a device**, using
+the same ChatGPT account and workspace. The helper talks directly to the socket
+configured by `CODEX_APP_SERVER_URL`. It enables remote control for the running
+process and prints the code only to the console. Treat the code as a credential;
+do not put it in environment variables, Compose files or logs. Pairing through
+the upstream Desktop "Connect" screen is separate from this console flow.
+
+The helper's runtime enablement is ephemeral. To retain remote control after an
+app-server restart, start the external service with `--remote-control` as above.
+Paired devices and server state remain subject to the CLI's own account and
+workspace requirements. A container restart interrupts active mobile work.
+
 ## Startup, reconnect and thread recovery
 
 The web backend starts even while the external app-server is unavailable. Its
@@ -74,7 +109,7 @@ addition to these delays. The sequence resets after successful recovery.
 | `CODEX_APP_SERVER_RESUME_TIMEOUT_MS`        | `30000`                       | Timeout for each thread restoration                                                 |
 | `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker  | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy)           |
 | `CODEX_WEB_USER_DATA_DIR`                   | `/home/node/.codex` in Docker | Writable Electron user-data directory for web settings, state and artifact sessions |
-| `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`         | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
+| `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`        | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
 | `CODEX_WEB_ELECTRON_DEBUG`                  | unset                         | Set to `1` for verbose Electron-stub calls                                          |
 
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
