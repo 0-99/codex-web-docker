@@ -6,6 +6,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { ServerResponse } from "node:http";
 import { pathAtBase } from "./base-path";
+import { startRemotePairing } from "./remote-pairing";
 
 type Status = {
   phase: string;
@@ -47,6 +48,50 @@ export async function installWebRuntime(
     );
   }
   const enabled = Boolean(process.env.CODEX_APP_SERVER_URL);
+  let pairingInProgress = false;
+  app.post(
+    pathAtBase(basePath, "__backend/remote-pairing"),
+    async (request, reply) => {
+      reply.header("Cache-Control", "no-store");
+      const origin = request.headers.origin;
+      let sameOrigin = false;
+      try {
+        sameOrigin = Boolean(
+          origin &&
+          request.headers.host &&
+          new URL(origin).host === request.headers.host,
+        );
+      } catch {
+        /* Reject malformed Origin headers. */
+      }
+      if (!sameOrigin || request.headers["sec-fetch-site"] === "cross-site") {
+        return reply.code(403).send({ error: "Same-origin request required" });
+      }
+      if (
+        !enabled ||
+        !process.env.CODEX_APP_SERVER_URL?.startsWith("unix:///")
+      ) {
+        return reply
+          .code(503)
+          .send({ error: "Unix app-server socket unavailable" });
+      }
+      if (pairingInProgress) {
+        return reply.code(429).send({ error: "Pairing already in progress" });
+      }
+      pairingInProgress = true;
+      try {
+        return await startRemotePairing(process.env.CODEX_APP_SERVER_URL);
+      } catch {
+        // App-server error messages may contain sensitive account details.
+        console.error("[remote-pairing] app-server request failed");
+        return reply
+          .code(502)
+          .send({ error: "App-server could not start pairing" });
+      } finally {
+        pairingInProgress = false;
+      }
+    },
+  );
   let status: Status = { phase: "backend-ready", updatedAt: Date.now() };
   const history: Status[] = [status];
   const streams = new Set<ServerResponse>();

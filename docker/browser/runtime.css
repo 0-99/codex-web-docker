@@ -77,3 +77,29 @@
     color: #eee;
   }
 }
+.codex-web-remote-pairing {
+  margin-top: 12px;
+  font:
+    14px/1.45 system-ui,
+    sans-serif;
+}
+.codex-web-remote-pairing button {
+  padding: 7px 12px;
+  border: 1px solid currentColor;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.codex-web-remote-pairing button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+.codex-web-remote-pairing [role="status"] {
+  margin-top: 8px;
+  overflow-wrap: anywhere;
+}
+.codex-web-remote-pairing strong {
+  font-family: ui-monospace, monospace;
+  user-select: all;
+}

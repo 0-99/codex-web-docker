@@ -152,9 +152,88 @@
     timer = setInterval(render, 250);
   }
   connectStatus();
+  // The bundled Desktop dialog can fail its account MFA-info preflight even
+  // when the external app-server is already authorized for remote control.
+  // Offer its own pairing RPC only after that specific dialog error appears.
+  function attachRemotePairingAction() {
+    const walker = document.createTreeWalker(
+      document.body,
+      NodeFilter.SHOW_TEXT,
+    );
+    while (walker.nextNode()) {
+      const value = walker.currentNode.textContent || "";
+      const german =
+        /Sicherheitsanforderungen konnten nicht gepr[üu]ft werden/i.test(value);
+      const english = /couldn.t check security requirements/i.test(value);
+      if (!german && !english) continue;
+      const error = walker.currentNode.parentElement;
+      if (
+        !error ||
+        error.nextElementSibling?.classList.contains("codex-web-remote-pairing")
+      )
+        continue;
+      const action = document.createElement("div");
+      action.className = "codex-web-remote-pairing";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.textContent = german
+        ? "Kopplungscode erzeugen"
+        : "Generate pairing code";
+      const message = document.createElement("div");
+      message.setAttribute("role", "status");
+      message.setAttribute("aria-live", "polite");
+      action.append(button, message);
+      error.insertAdjacentElement("afterend", action);
+      button.addEventListener("click", async () => {
+        button.disabled = true;
+        message.textContent = german
+          ? "Code wird angefordert …"
+          : "Requesting code …";
+        try {
+          const response = await fetch(
+            new URL("__backend/remote-pairing", document.baseURI),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: "{}",
+            },
+          );
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const { code, expiresAt } = await response.json();
+          if (typeof code !== "string" || !code) throw new Error("No code");
+          message.replaceChildren();
+          const label = document.createElement("span");
+          label.textContent = german
+            ? "Code für ChatGPT Connect: "
+            : "ChatGPT Connect code: ";
+          const codeElement = document.createElement("strong");
+          codeElement.textContent = code;
+          message.append(label, codeElement);
+          if (Number.isFinite(expiresAt)) {
+            const expiry = document.createElement("div");
+            expiry.textContent =
+              (german ? "Gültig bis " : "Expires ") +
+              new Date(expiresAt * 1000).toLocaleTimeString();
+            message.append(expiry);
+          }
+        } catch {
+          message.textContent = german
+            ? "Kopplung fehlgeschlagen. Prüfe die Web- und App-Server-Protokolle."
+            : "Pairing failed. Check the web and app-server logs.";
+        } finally {
+          button.disabled = false;
+        }
+      });
+    }
+  }
+  const pairingObserver = new MutationObserver(attachRemotePairingAction);
+  pairingObserver.observe(document.body, { childList: true, subtree: true });
+  attachRemotePairingAction();
   window.addEventListener("pagehide", () => {
     clearInterval(timer);
     events.close();
+    pairingObserver.disconnect();
   });
   window.addEventListener("pageshow", (event) => {
     if (event.persisted) connectStatus();
