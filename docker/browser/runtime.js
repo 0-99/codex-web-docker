@@ -152,9 +152,9 @@
     timer = setInterval(render, 250);
   }
   connectStatus();
-  // The bundled Desktop dialog can fail its account MFA-info preflight even
-  // when the external app-server is already authorized for remote control.
-  // Offer its own pairing RPC only after that specific dialog error appears.
+  // The bundled Desktop pairing flow can stop at the MFA-info check or fail
+  // when its Add device button tries to start pairing. Keep the official flow
+  // available and offer the existing app-server RPC beside it.
   function attachRemotePairingAction() {
     const walker = document.createTreeWalker(
       document.body,
@@ -165,28 +165,54 @@
       const german =
         /Sicherheitsanforderungen konnten nicht gepr[üu]ft werden/i.test(value);
       const english = /couldn.t check security requirements/i.test(value);
-      if (!german && !english) continue;
-      const error = walker.currentNode.parentElement;
+      const germanEmptyState =
+        /Ger[äa]t hinzuf[üu]gen, um diesen PC per Fernzugriff zu steuern/i.test(
+          value,
+        );
+      const englishEmptyState =
+        /add a device to control this (?:PC|computer) remotely/i.test(value);
+      if (!german && !english && !germanEmptyState && !englishEmptyState)
+        continue;
+      const anchor = walker.currentNode.parentElement;
+      let placement = anchor;
+      if (germanEmptyState || englishEmptyState) {
+        let container = anchor;
+        for (let depth = 0; depth < 4 && container; depth++) {
+          const addButton = [...container.querySelectorAll("button")].find(
+            (candidate) =>
+              /^(Hinzuf[üu]gen|Add)$/i.test(candidate.textContent.trim()),
+          );
+          if (addButton) {
+            placement = addButton;
+            break;
+          }
+          container = container.parentElement;
+        }
+        if (placement === anchor) continue;
+      }
       if (
-        !error ||
-        error.nextElementSibling?.classList.contains("codex-web-remote-pairing")
+        !placement ||
+        placement.nextElementSibling?.classList.contains(
+          "codex-web-remote-pairing",
+        )
       )
         continue;
       const action = document.createElement("div");
       action.className = "codex-web-remote-pairing";
       const button = document.createElement("button");
       button.type = "button";
-      button.textContent = german
+      const inGerman = german || germanEmptyState;
+      button.textContent = inGerman
         ? "Kopplungscode erzeugen"
         : "Generate pairing code";
       const message = document.createElement("div");
       message.setAttribute("role", "status");
       message.setAttribute("aria-live", "polite");
       action.append(button, message);
-      error.insertAdjacentElement("afterend", action);
+      placement.insertAdjacentElement("afterend", action);
       button.addEventListener("click", async () => {
         button.disabled = true;
-        message.textContent = german
+        message.textContent = inGerman
           ? "Code wird angefordert …"
           : "Requesting code …";
         try {
@@ -204,7 +230,7 @@
           if (typeof code !== "string" || !code) throw new Error("No code");
           message.replaceChildren();
           const label = document.createElement("span");
-          label.textContent = german
+          label.textContent = inGerman
             ? "Code für ChatGPT Connect: "
             : "ChatGPT Connect code: ";
           const codeElement = document.createElement("strong");
@@ -213,12 +239,12 @@
           if (Number.isFinite(expiresAt)) {
             const expiry = document.createElement("div");
             expiry.textContent =
-              (german ? "Gültig bis " : "Expires ") +
+              (inGerman ? "Gültig bis " : "Expires ") +
               new Date(expiresAt * 1000).toLocaleTimeString();
             message.append(expiry);
           }
         } catch {
-          message.textContent = german
+          message.textContent = inGerman
             ? "Kopplung fehlgeschlagen. Prüfe die Web- und App-Server-Protokolle."
             : "Pairing failed. Check the web and app-server logs.";
         } finally {
