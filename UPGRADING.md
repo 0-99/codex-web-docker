@@ -124,14 +124,13 @@ For the external app-server integration, verify these invariants after a merge:
 5. Inspect the real Desktop root/chat layout when changing viewport-related
    selectors. The browser regression fixture checks viewport behavior, but a
    real Android/iOS keyboard remains a useful deployment smoke check.
-6. When changing the bundled Desktop version, first run **Publish Docker image**
-   manually from the feature branch in GitHub Actions. The workflow builds and
-   publishes a branch-tagged image to Docker Hub after its smoke tests. Select
-   that tag in the test stack and open the real **Settings → Connections →
-   Control this PC** screen. Confirm **Generate pairing code** appears beside
-   **Add**, then request a code against a compatible app-server. The browser
-   fixture uses modeled markup and cannot detect an upstream copy or DOM
-   change. Merge and publish a release only after checking the preview image.
+6. After merging an upgrade, publish the usual tagged GitHub Release and wait
+   for the versioned and `latest` images on Docker Hub. Deploy the published
+   image in the test stack and open the real **Settings → Connections → Control
+   this PC** screen. Confirm **Generate pairing code** appears beside **Add**,
+   then request a code against a compatible app-server. The browser fixture
+   uses modeled markup and cannot detect an upstream copy or DOM change. Mark
+   an image as `stable` only after these manual checks succeed.
 
 Validation (after preparing the extracted application):
 
