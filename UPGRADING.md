@@ -124,6 +124,13 @@ For the external app-server integration, verify these invariants after a merge:
 5. Inspect the real Desktop root/chat layout when changing viewport-related
    selectors. The browser regression fixture checks viewport behavior, but a
    real Android/iOS keyboard remains a useful deployment smoke check.
+6. When changing the bundled Desktop version, open the real **Settings →
+   Connections → Control this PC** screen in a built image. Confirm the fork's
+   **Generate pairing code** action appears beside **Add**, click it against a
+   compatible app-server, and verify a code is returned. The browser fixture
+   uses modeled markup and cannot detect an upstream copy or DOM change. Only
+   after this check, update the reviewed Desktop version in
+   `test/remote-pairing-upgrade-gate.test.mjs`.
 
 Validation (after preparing the extracted application):
 
