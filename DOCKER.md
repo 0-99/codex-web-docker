@@ -52,9 +52,10 @@ volumes:
 
 ### Mobile Connect pairing
 
-Open **Settings → Connections → Add connection** in the web UI. If the
-bundled Desktop dialog cannot check security requirements, the fork offers
-**Generate pairing code** in that dialog. Clicking it asks the existing
+Open **Settings → Connections → Control this PC** in the web UI. The fork
+offers **Generate pairing code** beside the native **Add** button. It also
+appears when the bundled Desktop dialog cannot check security requirements.
+Clicking it asks the existing
 app-server to enable ephemeral remote control and create a short-lived manual
 code; enter the code in ChatGPT Connect on the phone. No second app-server or
 startup `--remote-control` option is needed. Existing paired connections
