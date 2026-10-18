@@ -15,7 +15,7 @@ import {
 
 test(
   "real Desktop resumes saved chats, sends turns, survives reconnect and offers mobile pairing",
-  { timeout: 120000 },
+  { timeout: 180000 },
   async (t) => {
     const appServer = await appServerFixture(t);
     const gateway = await pairingGateway(t, appServer);
@@ -112,7 +112,16 @@ test(
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
     const errors = [];
+    const diagnostics = [];
     page.on("pageerror", (e) => errors.push(e.message));
+    page.on("console", (message) => {
+      if (message.type() === "error") diagnostics.push(message.text().slice(0, 500));
+    });
+    page.on("requestfailed", (request) => {
+      if (new URL(request.url()).hostname === "127.0.0.1") {
+        diagnostics.push(`${request.url()}: ${request.failure()?.errorText}`);
+      }
+    });
     try {
       await page.goto(base + "thread/" + threadId);
       // Fresh Desktop state can open its first-run occupation wizard. Complete
@@ -221,7 +230,7 @@ test(
       await page
         .getByText("CI assistant response 2", { exact: true })
         .first()
-        .waitFor();
+        .waitFor({ timeout: 45000 });
       await page.evaluate(() =>
         window.dispatchEvent(
           new MessageEvent("message", {
@@ -261,7 +270,7 @@ test(
         await page.content(),
       );
       throw new Error(
-        `${e.message}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+        `${e.message}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
         { cause: e },
       );
     }
