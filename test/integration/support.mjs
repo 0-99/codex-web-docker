@@ -7,8 +7,9 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import readline from "node:readline";
+import { PassThrough } from "node:stream";
 import { setTimeout as delay } from "node:timers/promises";
-import { WebSocket } from "ws";
+import { WebSocket, WebSocketServer } from "ws";
 
 export async function until(fn, label, timeout = 15000) {
   const deadline = Date.now() + timeout;
@@ -85,11 +86,80 @@ export function rpcStream(child) {
   };
 }
 
+export function rpcSocket(socket) {
+  const stdout = new PassThrough();
+  socket.on("message", (data) => stdout.write(String(data) + "\n"));
+  return rpcStream({ stdout, stdin: { write: (data) => socket.send(data) } });
+}
+
+// Remote-control enrollment belongs to the authenticated cloud service. Stub
+// only those two requests; all normal Desktop RPC reaches the real CLI.
+export async function pairingGateway(t, appServer) {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cw-pair-"));
+  const socketPath = path.join(directory, "rpc.sock");
+  const server = http.createServer((_, reply) => reply.writeHead(404).end());
+  const ws = new WebSocketServer({ server });
+  const connections = new Set();
+  const requests = [];
+  ws.on("connection", (client) => {
+    const remote = new WebSocket(appServer.endpoint);
+    connections.add(client);
+    connections.add(remote);
+    const queued = [];
+    remote.on("open", () => {
+      for (const data of queued.splice(0)) remote.send(data);
+    });
+    client.on("message", (raw) => {
+      const data = String(raw);
+      const message = JSON.parse(data);
+      if (
+        message.method === "remoteControl/enable" ||
+        message.method === "remoteControl/pairing/start"
+      ) {
+        requests.push(message);
+        const result =
+          message.method === "remoteControl/enable"
+            ? {}
+            : {
+                manualPairingCode: "CI-PAIR-1234",
+                expiresAt: Math.floor(Date.now() / 1000) + 300,
+              };
+        client.send(JSON.stringify({ id: message.id, result }));
+      } else if (remote.readyState === WebSocket.OPEN) remote.send(data);
+      else queued.push(data);
+    });
+    remote.on("message", (data) => {
+      if (client.readyState === WebSocket.OPEN) client.send(String(data));
+    });
+    client.on("close", () => remote.terminate());
+    remote.on("close", () => client.close());
+    remote.on("error", () => client.close());
+  });
+  t.after(async () => {
+    for (const socket of connections) socket.terminate();
+    await new Promise((r) => ws.close(r));
+    await new Promise((r) => server.close(r));
+    await fs.rm(directory, { recursive: true, force: true });
+  });
+  server.listen(socketPath);
+  await once(server, "listening");
+  return { endpoint: `unix://${socketPath}`, requests };
+}
+
 async function modelServer() {
   const requests = [];
   const server = http.createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
+    if (request.url.endsWith("/models")) {
+      response.writeHead(200, { "Content-Type": "application/json" }).end(
+        JSON.stringify({
+          object: "list",
+          data: [{ id: "ci-model", object: "model", owned_by: "ci" }],
+        }),
+      );
+      return;
+    }
     if (!request.url.endsWith("/responses")) {
       response.writeHead(404).end();
       return;
@@ -179,7 +249,7 @@ export async function appServerFixture(t) {
     "Real integrations require an isolated network namespace",
   );
   assert.deepEqual(
-    (await fs.readdir("/sys/class/net")).sort(),
+    Object.keys(os.networkInterfaces()).sort(),
     ["lo"],
     "Only loopback may exist in the integration network namespace",
   );

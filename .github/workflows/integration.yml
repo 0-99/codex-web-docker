@@ -6,6 +6,10 @@ on:
     branches: [main]
   workflow_call:
 
+concurrency:
+  group: real-integration-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   integration:
     name: Real Desktop with ${{ matrix.cli }} CLI

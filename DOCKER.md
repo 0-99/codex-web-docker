@@ -159,10 +159,14 @@ stack before deciding whether a separate CLI upgrade is needed.
 
 Keep the current endpoint, base path, networks and persistent volumes. Back up
 web-side state before testing the newer Desktop, and retain the previous image
-tag for rollback. Verify a new chat, a resumed chat, recovery after an app-server
-restart, the mobile composer and a real pairing-code request before promoting
-the image. The pairing action is available beside **Add** or **Set up** in the
+tag for rollback. CI automatically checks new and resumed chats, app-server
+restart recovery, the actual mobile composer and the pairing-code path before
+image publication. The pairing action is available beside **Add** or **Set up** in the
 local connection screen; its RPC still requires a Unix app-server endpoint.
+
+These integration checks run without internet access, using real CLI processes
+and fixed local model responses. Cloud pairing replies are simulated; signing
+a physical phone into ChatGPT is not part of the automated release checks.
 
 The web build revision now appears under the profile menu's **Help** submenu.
 
