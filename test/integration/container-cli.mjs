@@ -14,6 +14,10 @@ const inspected = JSON.parse(
 )[0];
 assert.equal(inspected.HostConfig.NetworkMode, "none");
 assert.deepEqual(Object.keys(inspected.NetworkSettings.Networks), ["none"]);
+const security = JSON.parse(process.env.CODEX_TEST_CLI_SECURITY_OPTS || "[]");
+assert.ok(Array.isArray(security));
+for (const option of security)
+  assert.ok(["seccomp=unconfined", "systempaths=unconfined"].includes(option));
 const name = `codex-ci-cli-${randomUUID()}`;
 const root = path.resolve(import.meta.dirname, "../..");
 const child = spawn(
@@ -26,6 +30,7 @@ const child = spawn(
     "--pull=never",
     "--name",
     name,
+    ...security.flatMap((option) => ["--security-opt", option]),
     "--network",
     `container:${anchor}`,
     "--user",

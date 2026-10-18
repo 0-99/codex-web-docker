@@ -259,30 +259,47 @@ other cookie-based authentication gateway authorize the manifest request.
 
 ## Compose and Portainer
 
-When the app-server runs in another container on the same Docker host, create
-the external user-defined bridge network once:
+The [example](examples/docker-compose.yml) starts both `codex-cli` and
+`codex-web`, with Compose-managed networks and volumes. No existing network,
+volume, reverse proxy or MCP credentials are required:
 
 ```sh
-docker network create --driver bridge codex
+docker compose -f examples/docker-compose.yml up -d
+docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap device-auth
+docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap status
+docker compose -f examples/docker-compose.yml exec codex-cli codex
 ```
 
-This keeps both containers off the host network while providing automatic DNS
-resolution between them. Docker's shared default `bridge` network is not used.
-General internet access from `codex-web` is not required for the core workflow
-through an external app-server. On an internal-only network, optional Desktop
-requests for feature flags, account metadata, usage and cloud tasks may log
-`sa_server_request_failed` and return `/wham/...` status 500; the app-server
-container remains responsible for Codex/OpenAI connectivity.
+Complete device authorization, then trust `/workspace` in the interactive CLI.
+Open `http://127.0.0.1:8214/`. The CLI remains available through `compose exec`.
+The frontend starts without waiting for CLI health and reconnects automatically.
+The socket healthcheck verifies listener presence, not account authorization.
 
-Then set `WORKSPACE_PATH` and, if needed, `CODEX_APP_SERVER_URL`, and deploy
-[`examples/docker-compose.yml`](examples/docker-compose.yml). The app-server
-must access project directories at the same absolute paths as `codex-web`,
-whether it runs in a container or natively; otherwise the web file picker and
-Codex will refer to different files.
+Both containers mount the same workspace at `/workspace` and
+`/home/node/Documents/Codex`, including projectless Desktop conversations.
+Account/configuration data and web state use separate persistent home volumes.
+The socket volume is a small tmpfs with UID/GID 1000 and mode 0770; it holds no
+persistent account data and needs no initialization container. Docker creates
+project-scoped resource names. Existing installation-specific volumes are not
+automatically reused: explicitly map their names in your deployment override
+if you want to retain existing data rather than start fresh.
 
-The example publishes the UI only on `127.0.0.1:8214` for local testing. For
-Nginx Proxy Manager, attach `codex-web` and Nginx Proxy Manager to a dedicated
-proxy network, remove the `ports` entry, and proxy to `codex-web:8214`.
+Only the CLI joins the outbound bridge. Its additional internal network is
+available for optional MCP/sidecar services. The frontend uses a separate
+internal network with a localhost-published port; it has no independent internet
+access. Optional Desktop account/feature/cloud requests may fail there while
+the core app-server workflow remains available. For Nginx Proxy Manager, attach
+the proxy to this project's `web_access` network, remove `ports`, and forward to
+`codex-web:8214`. Set `CODEX_WEB_BASE_PATH` for subpath hosting and forward that
+prefix unchanged. A proxy is optional for local use.
+
+The example applies `seccomp=unconfined` and `systempaths=unconfined` to the CLI
+for bubblewrap namespace and `/proc` operations; these relax Docker restrictions
+without granting `SYS_ADMIN`. AppArmor relaxation is commented out and should
+only be enabled if the host blocks the sandbox. The frontend retains Docker's
+default security settings. Optional MCP token variables are commented examples;
+configure the corresponding MCP servers separately. `host.docker.internal`
+provides host-service access through Docker's host gateway.
 
 There is deliberately no authentication inside this image. Anyone who can
 reach the UI can operate the connected Codex instance with that instance's
@@ -303,34 +320,23 @@ action's matching tags, including `latest` for a stable semantic version.
 ### App-server image compatibility checks
 
 The actual `0.155.1` image passed the full offline integration suite on
-2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39133090483).
+2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
 This validates the covered local workflows. Shell-tool execution inside the
 CLI sandbox, live account enrollment and known failures outside these flows
 need separate regression cases; see the container sandbox configuration above.
 
-The [example Compose file](examples/docker-compose.yml) includes the optional
-`codex-app-server` service pinned to `ghcr.io/icoretech/codex-docker:0.155.1`.
-To start it alongside the web frontend:
-
-```sh
-docker network create --driver bridge codex
-docker compose -f examples/docker-compose.yml --profile app-server up -d
-```
-
-Use an existing `codex` network if already created. Without that profile, the
-frontend continues to use an independently managed app-server. Both services
-mount the same workspace path and keep separate persistent home volumes. Sign
-the app-server into your account separately; the example contains no credentials.
-The optional service uses the shared Unix socket required by Mobile Connect's
-fallback pairing action. A short-lived `codex-socket-init` service prepares its
-permissions before the CLI starts; it has no network, workspace or account data.
+The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
+to `ghcr.io/icoretech/codex-docker:0.155.1` and uses a shared Unix socket, also
+required by the Mobile Connect fallback. See [setup](#compose-and-portainer).
 
 `test/integration/images.json` pins the required companion-image test to
 `ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
 pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
-checks that both Compose services match this supported image pin and executes
-the socket initializer to verify owner-only access for the image's default UID.
+checks the Compose CLI image pin, creates the configured tmpfs socket volume,
+checks its permissions with default UID 1000, starts the actual listener and
+checks both workspace aliases on a fresh named volume. Container integration
+tests also apply the CLI security options from the example.
 The separate `candidate` case probes a prospective update (initially `:latest`)
 and is advisory. A candidate failure does not change the supported pin or any
 deployment. Propose image upgrades by changing the candidate first, then promote

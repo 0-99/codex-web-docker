@@ -14,9 +14,10 @@ a browser frontend for codex desktop, running on a machine you control.
 > `/my/example/subdir/` by setting `CODEX_WEB_BASE_PATH`; `/` remains the
 > default. Static assets, navigation, uploads, and WebSockets use the configured
 > path automatically.
-> The [example Compose file](examples/docker-compose.yml) pins the optional
-> app-server service to the CI-validated version `0.155.1`. Enable it with the
-> `app-server` profile.
+> The [example Compose file](examples/docker-compose.yml) provides a standalone stack,
+> with the app-server pinned to the CI-validated version `0.155.1`. Run
+> `docker compose -f examples/docker-compose.yml up -d`; no existing networks
+> or volumes are required. See [first-time setup](DOCKER.md#compose-and-portainer).
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
 > for required CI checks and the separate, advisory upgrade candidate. Do not use
 > a floating `latest` tag as the supported CLI baseline.

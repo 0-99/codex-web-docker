@@ -151,9 +151,9 @@ matrix case is explicitly advisory (`continue-on-error`) because newer images
 may be incompatible. Its failure remains visible in its job, diagnostics and
 summary, but does not invalidate the supported baseline or promote the image.
 To propose an update, set a candidate tag, review its results, then change the
-supported image and expected CLI version in a PR; update the optional service
+supported image and expected CLI version in a PR; update the CLI service
 in `examples/docker-compose.yml` and the README reference at the same time.
-CI validates the Compose file with the app-server profile enabled. The supported case must pass
+CI validates the standalone Compose file. The supported case must pass
 before Docker publication. Never replace the supported tag with `latest`.
 
 Container cases create a network namespace using a Docker container with
@@ -164,9 +164,10 @@ operations, and downloaded images are referenced by digest during execution.
 A restart stops the real CLI container and launches another with the same test
 home so the persistence checks also cover container lifecycle. Container cases
 use the real CLI Unix listener, matching the Compose service and exercising
-owner-only socket access. The Compose helper initializes the dedicated socket
-volume for UID 1000 in both runtime images; account homes stay separate.
-
+socket access. CI creates the example's tmpfs socket volume with UID/GID 1000,
+checks its permissions and actual listener healthcheck, and verifies both
+workspace aliases on a fresh named volume. Integration containers use the
+example's CLI security options. Account homes stay separate.
 
 `.github/workflows/integration.yml` prepares the actual Desktop and downloads
 checksum-pinned CLI packages for the previous distinct version from Git history

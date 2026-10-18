@@ -15,33 +15,32 @@ function docker(args) {
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
 }
-let socketInit;
+const compose = JSON.parse(
+  docker([
+    "compose",
+    "--file",
+    "examples/docker-compose.yml",
+    "config",
+    "--format",
+    "json",
+  ]),
+);
+const cli = compose.services["codex-cli"];
 if (selected === "supported") {
-  const compose = JSON.parse(
-    docker([
-      "compose",
-      "--file",
-      "examples/docker-compose.yml",
-      "--profile",
-      "app-server",
-      "config",
-      "--format",
-      "json",
-    ]),
-  );
   assert.equal(
-    compose.services["codex-app-server"].image,
+    cli.image,
     image,
     "Example Compose must use the supported image from images.json",
   );
-  socketInit = compose.services["codex-socket-init"];
-  assert.equal(socketInit.image, image);
-  assert.deepEqual(compose.services["codex-app-server"].command, [
-    "app-server",
-    "--listen",
-    "unix:///run/codex/app-server.sock",
-  ]);
 }
+assert.deepEqual(cli.command, [
+  "app-server",
+  "--listen",
+  "unix:///run/codex/app-server.sock",
+]);
+const security = cli.security_opt;
+assert.deepEqual(security, ["seccomp=unconfined", "systempaths=unconfined"]);
+const securityArgs = security.flatMap((option) => ["--security-opt", option]);
 docker(["pull", image]);
 const inspected = JSON.parse(docker(["image", "inspect", image]))[0];
 const digest = inspected.RepoDigests.find((ref) =>
@@ -59,43 +58,85 @@ const version = docker([
 if (expectedCliVersion)
   assert.equal(version, `codex-cli ${expectedCliVersion}`);
 console.log(`${selected}: ${image}\nDigest: ${digest}\n${version}`);
-if (socketInit) {
-  const volume = `codex-ci-socket-${process.pid}`;
-  docker(["volume", "create", volume]);
+// Exercise the example's fresh volumes with the image's default user. These
+// probes have no network, account credentials or model requests.
+if (selected === "supported") {
+  const socket = `codex-ci-socket-${process.pid}`;
+  const workspace = `codex-ci-workspace-${process.pid}`;
+  const probe = `codex-ci-cli-volume-${process.pid}`;
+  const volume = compose.volumes.codex_socket;
+  docker([
+    "volume",
+    "create",
+    "--driver",
+    volume.driver,
+    ...Object.entries(volume.driver_opts).flatMap(([key, value]) => [
+      "--opt",
+      `${key}=${value}`,
+    ]),
+    socket,
+  ]);
+  docker(["volume", "create", workspace]);
   try {
+    const mounts = [
+      "--volume",
+      `${socket}:/run/codex`,
+      "--volume",
+      `${workspace}:/workspace`,
+      "--volume",
+      `${workspace}:/home/node/Documents/Codex`,
+    ];
     docker([
       "run",
       "--rm",
       "--network",
       "none",
-      "--user",
-      socketInit.user,
-      "--volume",
-      `${volume}:/run/codex`,
-      "--entrypoint",
-      socketInit.entrypoint[0],
-      digest,
-      ...socketInit.entrypoint.slice(1),
-      ...socketInit.command,
-    ]);
-    docker([
-      "run",
-      "--rm",
-      "--network",
-      "none",
-      "--volume",
-      `${volume}:/run/codex`,
+      ...mounts,
       "--entrypoint",
       "/bin/sh",
       digest,
       "-ec",
-      'test "$(id -u)" = 1000 && test "$(stat -c %a /run/codex)" = 700 && test -w /run/codex',
+      'test "$(id -u)" = 1000 && test "$(stat -c %a /run/codex)" = 770 && test -w /run/codex && echo workspace-probe > /workspace/.compose-probe && grep -qx workspace-probe /home/node/Documents/Codex/.compose-probe',
     ]);
-    console.log(
-      "Compose socket initialization verified with the image's default UID 1000",
+    docker([
+      "run",
+      "--detach",
+      "--name",
+      probe,
+      "--network",
+      "none",
+      ...securityArgs,
+      ...mounts,
+      digest,
+      ...cli.command,
+    ]);
+    let ready = false;
+    for (let attempt = 0; attempt < 50; attempt++) {
+      try {
+        docker(["exec", probe, "/bin/sh", "-ec", cli.healthcheck.test[1]]);
+        ready = true;
+        break;
+      } catch {
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+    }
+    assert.ok(
+      ready,
+      "Compose app-server must create its socket on the fresh tmpfs volume",
     );
+    console.log(
+      "Compose default UID 1000, tmpfs socket, healthcheck and both workspace paths verified",
+    );
+  } catch (error) {
+    try {
+      console.error(docker(["logs", probe]));
+    } catch {}
+    throw error;
   } finally {
-    docker(["volume", "rm", volume]);
+    try {
+      docker(["rm", "--force", probe]);
+    } catch {}
+    docker(["volume", "rm", socket, workspace]);
   }
 }
 
@@ -126,6 +167,7 @@ const env = {
   CODEX_TEST_IMAGE_REF: digest,
   CODEX_TEST_NETWORK_CONTAINER: anchor,
   CODEX_TEST_NETWORK_PID: pid,
+  CODEX_TEST_CLI_SECURITY_OPTS: JSON.stringify(security),
 };
 assert.ok(
   process.env.GITHUB_ENV,
