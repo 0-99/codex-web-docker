@@ -115,7 +115,8 @@ test(
     const diagnostics = [];
     page.on("pageerror", (e) => errors.push(e.message));
     page.on("console", (message) => {
-      if (message.type() === "error") diagnostics.push(message.text().slice(0, 500));
+      if (message.type() === "error")
+        diagnostics.push(message.text().slice(0, 500));
     });
     page.on("requestfailed", (request) => {
       if (new URL(request.url()).hostname === "127.0.0.1") {
@@ -234,13 +235,16 @@ test(
       await page.evaluate(() =>
         window.dispatchEvent(
           new MessageEvent("message", {
-            data: { type: "navigate-to-route", path: "/settings/connections/computer" },
+            data: {
+              type: "navigate-to-route",
+              path: "/settings/connections/computer",
+            },
           }),
         ),
       );
       await page
-        .getByRole("tab", { name: "Control this PC", exact: true })
-        .click();
+        .getByText("Devices that can control this PC", { exact: true })
+        .waitFor();
       const pairing = page.getByRole("button", {
         name: "Generate pairing code",
         exact: true,

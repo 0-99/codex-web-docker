@@ -118,6 +118,20 @@ jobs:
 
           if ! exit_code="$(timeout 60s docker wait "$container_name")"; then
             docker logs "$container_name"
+            # Early Desktop startup errors can be written to its log directory
+            # before the normal console logger is installed.
+            docker exec "$container_name" node -e '
+              const fs = require("node:fs"), path = require("node:path");
+              function logs(dir) {
+                if (!fs.existsSync(dir)) return;
+                for (const entry of fs.readdirSync(dir, {withFileTypes: true})) {
+                  const file = path.join(dir, entry.name);
+                  if (entry.isDirectory()) logs(file);
+                  else if (/\.log$/.test(file)) console.log(file + "\n" + fs.readFileSync(file, "utf8").split("\n").slice(-30).join("\n"));
+                }
+              }
+              logs("/home/node/.codex/logs");
+            ' || true
             exit 1
           fi
           if [[ "$exit_code" == "0" ]]; then

@@ -78,25 +78,17 @@ the patches were applied as expected.
 
 ## validation
 
-to validate things are still working, we'll first validate the server, then the
-client. before starting this step, make sure to wait for the
-`upgrading the codex-cli version` subagent to finish.
+After preparing the extracted application, run `npm test`,
+`npm run build:browser` and `npm run test:browser-runtime`. Require the
+**Test real Desktop and app-server offline** workflow for both CLI versions and
+all Docker platform checks before merging. The integration workflow completes
+the real browser flows automatically; its failure artifacts contain the screen
+and HTML needed to investigate failures. See the offline CI description below
+for coverage and the external services it simulates.
 
-to validate the server, run the following
-
-```bash
-nix develop --command yarn server
-```
-
-next validate the client by opening a browser window to `http://localhost:8214`
-and validating things show up on the page.
-
-look in the console for errors. also, look on the screen to see whether any
-error dialogs popped up. sometimes errors occur, but they're silent and exhibit
-as loading taking forever (more than 1m). look out for that case too.
-
-if there are errors, bring them to the users attention and we will decide how to
-proceed.
+A manual browser or phone session is useful for diagnosing an external account
+or device problem, but is not a recurring release check. Keep failed checks
+blocking until their cause is resolved.
 
 ## Maintaining this Docker/web fork
 
