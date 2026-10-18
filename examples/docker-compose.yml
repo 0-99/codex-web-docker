@@ -30,11 +30,10 @@ services:
 
     environment:
       CODEX_HOME: /home/codex/.codex
-      # Optional MCP credentials: configure the MCP servers separately and put
-      # the real values in your local .env/stack environment, never in this file.
-      # HOMEASSISTANT_TOKEN: ${HOMEASSISTANT_TOKEN:-}
-      # PORTAINER_TOKEN: ${PORTAINER_TOKEN:-}
-      # PORTAINER_MCP_AUTH_TOKEN: ${PORTAINER_MCP_AUTH_TOKEN:-}
+      # Optional: pass a credential to an MCP server configured separately.
+      # Replace MCP_API_TOKEN with the environment variable that server expects
+      # and set its value in your local .env/stack environment.
+      # MCP_API_TOKEN: ${MCP_API_TOKEN:-}
 
     volumes:
       - codex_data:/home/codex/.codex

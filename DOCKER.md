@@ -297,8 +297,9 @@ The example applies `seccomp=unconfined` and `systempaths=unconfined` to the CLI
 for bubblewrap namespace and `/proc` operations; these relax Docker restrictions
 without granting `SYS_ADMIN`. AppArmor relaxation is commented out and should
 only be enabled if the host blocks the sandbox. The frontend retains Docker's
-default security settings. Optional MCP token variables are commented examples;
-configure the corresponding MCP servers separately. `host.docker.internal`
+default security settings. The commented `MCP_API_TOKEN` is a generic credential example;
+replace the variable name with the one your MCP server expects and configure
+the server separately. Passing the variable alone does not configure MCP. `host.docker.internal`
 provides host-service access through Docker's host gateway.
 
 There is deliberately no authentication inside this image. Anyone who can
