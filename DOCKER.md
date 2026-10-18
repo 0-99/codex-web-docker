@@ -305,10 +305,33 @@ action's matching tags, including `latest` for a stable semantic version.
 
 ### App-server image compatibility checks
 
+The actual `0.155.1` image passed the full offline integration suite on
+2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39133090483).
+This validates the covered local workflows; live account enrollment and known
+failures outside those workflows need their own regression cases.
+
+The [example Compose file](examples/docker-compose.yml) includes the optional
+`codex-app-server` service pinned to `ghcr.io/icoretech/codex-docker:0.155.1`.
+To start it alongside the web frontend:
+
+```sh
+docker network create --driver bridge codex
+docker compose -f examples/docker-compose.yml --profile app-server up -d
+```
+
+Use an existing `codex` network if already created. Without that profile, the
+frontend continues to use an independently managed app-server. Both services
+mount the same workspace path and keep separate persistent home volumes. Sign
+the app-server into your account separately; the example contains no credentials.
+The optional service uses private WebSocket transport; Mobile Connect's fallback
+pairing action requires the shared Unix-socket setup described above.
+
+
 `test/integration/images.json` pins the required companion-image test to
 `ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
-pairing flow. The job summary reports its pulled digest and actual CLI version.
+pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
+checks that the example Compose service matches this supported image pin.
 The separate `candidate` case probes a prospective update (initially `:latest`)
 and is advisory. A candidate failure does not change the supported pin or any
 deployment. Propose image upgrades by changing the candidate first, then promote

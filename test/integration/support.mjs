@@ -323,11 +323,20 @@ export async function appServerFixture(t) {
   const port = reservation.address().port;
   await new Promise((resolve) => reservation.close(resolve));
   const endpoint = `ws://127.0.0.1:${port}`;
+  // Exercise the same listener used by the companion Compose service. The
+  // container namespace still has only loopback, so no port is exposed outside CI.
+  const listenEndpoint = process.env.CODEX_TEST_IMAGE_REF
+    ? endpoint.replace("127.0.0.1", "0.0.0.0")
+    : endpoint;
   let serverProcess;
   async function start() {
-    serverProcess = childProcess(binary, ["app-server", "--listen", endpoint], {
-      CODEX_HOME: codexHome,
-    });
+    serverProcess = childProcess(
+      binary,
+      ["app-server", "--listen", listenEndpoint],
+      {
+        CODEX_HOME: codexHome,
+      },
+    );
     await until(async () => {
       if (serverProcess.child.exitCode !== null)
         throw new Error(serverProcess.log());

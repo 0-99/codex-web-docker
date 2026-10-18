@@ -15,6 +15,25 @@ function docker(args) {
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
 }
+if (selected === "supported") {
+  const compose = JSON.parse(
+    docker([
+      "compose",
+      "--file",
+      "examples/docker-compose.yml",
+      "--profile",
+      "app-server",
+      "config",
+      "--format",
+      "json",
+    ]),
+  );
+  assert.equal(
+    compose.services["codex-app-server"].image,
+    image,
+    "Example Compose must use the supported image from images.json",
+  );
+}
 docker(["pull", image]);
 const inspected = JSON.parse(docker(["image", "inspect", image]))[0];
 const digest = inspected.RepoDigests.find((ref) =>

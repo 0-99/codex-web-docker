@@ -151,7 +151,9 @@ matrix case is explicitly advisory (`continue-on-error`) because newer images
 may be incompatible. Its failure remains visible in its job, diagnostics and
 summary, but does not invalidate the supported baseline or promote the image.
 To propose an update, set a candidate tag, review its results, then change the
-supported image and expected CLI version in a PR. The supported case must pass
+supported image and expected CLI version in a PR; update the optional service
+in `examples/docker-compose.yml` and the README reference at the same time.
+CI validates the Compose file with the app-server profile enabled. The supported case must pass
 before Docker publication. Never replace the supported tag with `latest`.
 
 Container cases create a network namespace using a Docker container with

@@ -4,7 +4,7 @@ a browser frontend for codex desktop, running on a machine you control.
 
 > This fork also provides a CLI-free multi-architecture Docker image
 > that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
-> [`ghcr.io/icoretech/codex-docker:latest`](https://github.com/icoretech/codex-docker)
+> [`ghcr.io/icoretech/codex-docker:0.155.1`](https://github.com/icoretech/codex-docker)
 > is one possible companion image when running the Codex CLI in another
 > container, but it is not a dependency. The app-server does not have to run in
 > Docker; it can also run natively on the Docker host or on another reachable
@@ -14,8 +14,12 @@ a browser frontend for codex desktop, running on a machine you control.
 > `/my/example/subdir/` by setting `CODEX_WEB_BASE_PATH`; `/` remains the
 > default. Static assets, navigation, uploads, and WebSockets use the configured
 > path automatically.
-> At the time of writing, `latest` corresponds to Codex CLI version `0.151.0`;
-> use `ghcr.io/icoretech/codex-docker:0.151.0` to pin this exact version.
+> The [example Compose file](examples/docker-compose.yml) pins the optional
+> app-server service to the CI-validated version `0.155.1`. Enable it with the
+> `app-server` profile.
+> See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
+> for required CI checks and the separate, advisory upgrade candidate. Do not use
+> a floating `latest` tag as the supported CLI baseline.
 
 https://github.com/user-attachments/assets/0a33cbd8-741c-412c-9e75-46dfe9324596
 

@@ -54,6 +54,24 @@ services:
       # optional Desktop cloud features are unavailable; see DOCKER.md.
       - codex
 
+  # Optional companion: enable with `docker compose --profile app-server up -d`.
+  # Keep this tag aligned with test/integration/images.json's supported image.
+  codex-app-server:
+    profiles: [app-server]
+    image: ghcr.io/icoretech/codex-docker:0.155.1
+    container_name: codex-app-server
+    init: true
+    restart: unless-stopped
+    command: [app-server, --listen, "ws://0.0.0.0:4500"]
+    environment:
+      CODEX_HOME: /home/codex/.codex
+    volumes:
+      - codex-cli-home:/home/codex/.codex
+      - ${WORKSPACE_PATH:-./workspace}:/workspace
+    networks:
+      - codex
+    # No published port: only services on the shared private network can reach it.
+
 networks:
   # Deliberately use a user-defined bridge network instead of host networking
   # or Docker's shared default `bridge`. It provides isolation and DNS-based
@@ -67,3 +85,4 @@ networks:
 
 volumes:
   codex-web-home:
+  codex-cli-home:
