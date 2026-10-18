@@ -102,7 +102,7 @@ export async function pairingGateway(t, appServer) {
   const connections = new Set();
   const requests = [];
   ws.on("connection", (client) => {
-    const remote = new WebSocket(appServer.endpoint);
+    const remote = appServer.openSocket();
     connections.add(client);
     connections.add(remote);
     const queued = [];
@@ -370,6 +370,7 @@ export async function appServerFixture(t) {
     log: () => serverProcess.log(),
     stop: () => serverProcess.stop(),
     start,
+    openSocket,
     async connect() {
       const socket = openSocket();
       await once(socket, "open");
