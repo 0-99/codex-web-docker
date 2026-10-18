@@ -96,7 +96,7 @@ addition to these delays. The sequence resets after successful recovery.
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
 `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS=8` make one initial attempt and at most eight
 retries, waiting 5 seconds before the first retry and 15 seconds thereafter.
-The proxy still enforces a timeout on each attempt. Desktop `26.901.41123`
+The proxy still enforces a timeout on each attempt. Desktop `26.1007.30912`
 keeps local stdio initialization pending after its diagnostic timeout, so no
 fork timeout patch is needed. Other transports retain upstream behavior.
 Upstream also reloads browser tabs after a lost browser-to-backend IPC
@@ -148,6 +148,24 @@ unreachable, so a selected non-English locale also applies to the Desktop UI.
 The connection panel currently has German and English text selected from the
 browser language.
 
+## Upgrading the web image
+
+The bundled Desktop is `26.1007.30912`. Updating this image replaces the web
+interface and bridge; it does not update the independently managed app-server.
+The upstream Nix package now pins CLI `0.162.0-alpha.17.2`, but that alpha CLI
+is not included in the Docker image and is not an automatic upgrade requirement
+for an existing deployment. Check the actual app-server version in the test
+stack before deciding whether a separate CLI upgrade is needed.
+
+Keep the current endpoint, base path, networks and persistent volumes. Back up
+web-side state before testing the newer Desktop, and retain the previous image
+tag for rollback. Verify a new chat, a resumed chat, recovery after an app-server
+restart, the mobile composer and a real pairing-code request before promoting
+the image. The pairing action is available beside **Add** or **Set up** in the
+local connection screen; its RPC still requires a Unix app-server endpoint.
+
+The web build revision now appears under the profile menu's **Help** submenu.
+
 ## Persistence and fresh volumes
 
 The Compose example mounts a named volume at `/home/node/.codex` for web-side
@@ -190,7 +208,7 @@ ownership; image initialization does not change arbitrary host directories.
 
 ## Visible web build revision
 
-Open the Help menu in the sidebar to see **Web build**. It shows the Git commit
+Open the profile menu's Help submenu to see **Web build**. It shows the Git commit
 used to build the running `codex-web` image. This identifies the web frontend
 itself, independently of the bundled Desktop version and the external Codex
 app-server version.

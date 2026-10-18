@@ -8,19 +8,28 @@ import { format } from "prettier";
 // is needed while the actual local-host factory enables this upstream option.
 // This bundle no longer needs a patch, so prepare_asar leaves it minified.
 const bundle = await format(
-  readFileSync("scratch/asar/.vite/build/src-VqXTPopo.js", "utf8"),
+  readFileSync("scratch/asar/.vite/build/src-BJv5Mk7n.js", "utf8"),
   { parser: "babel" },
 );
-const main = readFileSync("scratch/asar/.vite/build/main-C5K7o1Hr.js", "utf8");
-assert.match(main, /var W = `local`/);
-assert.match(main, /continueWaitingForStdioInitializeTimeout: t.id === W/);
+const main = readFileSync("scratch/asar/.vite/build/main-CqEoQDOU.js", "utf8");
+const hosts = readFileSync(
+  "scratch/asar/.vite/build/startup-requirements-C6B1x9gL.js",
+  "utf8",
+);
+assert.match(hosts, /\bQr\s*=\s*`local`/);
+assert.match(
+  hosts,
+  /Object.defineProperty\(exports,"h",\{enumerable:!0,get:function\(\)\{return Qr\}\}\)/,
+);
+assert.match(main, /l = require\("\.\/startup-requirements-C6B1x9gL.js"\)/);
+assert.match(main, /continueWaitingForStdioInitializeTimeout: t.id === l.h/);
 const start = bundle.indexOf("    scheduleInitializeTimeout() {");
 const end = bundle.indexOf("    clearInitializeTimeoutTimer() {", start);
 assert.ok(
   start >= 0 && end > start,
   "locate the pinned Desktop timeout method",
 );
-const deadline = Number(bundle.match(/\bxJ = ([\deE.+-]+)/)?.[1]);
+const deadline = Number(bundle.match(/\blB = ([\deE.+-]+)/)?.[1]);
 assert.equal(deadline, 30000);
 
 function expireDeadline(transport, hostId, hostKind = "local") {
@@ -29,10 +38,13 @@ function expireDeadline(transport, hostId, hostKind = "local") {
   const method = vm.runInNewContext(
     `({${bundle.slice(start, end)}}).scheduleInitializeTimeout`,
     {
-      xJ: deadline,
-      mK: "initialize",
-      xW: "initialize timed out",
-      CW: "timeout",
+      lB: deadline,
+      SL: "initialize",
+      sL: "initialize timed out",
+      lL: "timeout",
+      EL() {
+        effects.reported++;
+      },
       setTimeout(fn, ms) {
         assert.equal(ms, deadline);
         callback = fn;

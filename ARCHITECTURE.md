@@ -82,9 +82,12 @@ extracted Desktop application. Do not fold these modules into Desktop bundles.
 `main.ts` installs the extension and wraps IPC dispatch with a browser-language
 context. The Electron shim reads that context without overwriting settings;
 Desktop still resolves `localeOverride`. No new webview patch is needed for
-status or mobile layout. Desktop `26.901.41123` already keeps local stdio
+status or mobile layout. Desktop `26.1007.30912` still keeps local stdio
 initialization pending, so the former fork timeout patch has been removed.
-The extracted-code patches in this branch now come unchanged from upstream.
+Most extracted-code patches track upstream. The fork also patches the profile
+Help submenu to show its build revision and guards the Desktop tool override
+factories for an external app-server. Those guards leave authentication,
+workspace settings and other startup overrides intact.
 
 Each proxy reports states over an authenticated loopback TCP connection created
 by the backend. Its ephemeral port and random token are inherited through

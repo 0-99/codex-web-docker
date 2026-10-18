@@ -104,24 +104,61 @@ test(
     await assertComposerVisible();
     // The Desktop Add action can fail without showing the older MFA error.
     // Pairing must remain reachable from the stable empty state in Settings.
-    await page.evaluate(() => {
-      const settings = document.createElement("section");
-      settings.style.cssText =
-        "position:fixed;top:0;left:0;z-index:100;background:white";
-      settings.innerHTML =
-        '<div><p>Gerät hinzufügen, um diesen PC per Fernzugriff zu steuern</p><button type="button">Hinzufügen</button></div>';
-      document.body.append(settings);
-    });
-    const pairingButton = page.getByRole("button", {
-      name: "Kopplungscode erzeugen",
-    });
-    await pairingButton.waitFor();
-    assert.equal(await pairingButton.count(), 1);
-    await pairingButton.click();
-    await page.getByText(/Kopplung fehlgeschlagen/).waitFor();
-    await page.evaluate(() =>
-      document.querySelector("body > section:last-child").remove(),
-    );
+    for (const [description, add, pairing] of [
+      [
+        "Gerät hinzufügen, um diesen PC per Fernzugriff zu steuern",
+        "Hinzufügen",
+        "Kopplungscode erzeugen",
+      ],
+      [
+        "Add device to control this PC remotely",
+        "Add",
+        "Generate pairing code",
+      ],
+      [
+        "Add a device to control this computer remotely",
+        "Add",
+        "Generate pairing code",
+      ],
+      [
+        "Steuere diesen PC über dein Smartphone oder ein anderes Gerät.",
+        "Einrichten",
+        "Kopplungscode erzeugen",
+      ],
+      [
+        "Control this PC from your phone or other device",
+        "Set up",
+        "Generate pairing code",
+      ],
+    ]) {
+      await page.evaluate(
+        ({ description, add }) => {
+          const settings = document.createElement("section");
+          settings.style.cssText =
+            "position:fixed;top:0;left:0;z-index:100;background:white";
+          const container = document.createElement("div");
+          const text = document.createElement("p");
+          text.textContent = description;
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = add;
+          container.append(text, button);
+          settings.append(container);
+          document.body.append(settings);
+        },
+        { description, add },
+      );
+      const pairingButton = page.getByRole("button", {
+        name: pairing,
+      });
+      await pairingButton.waitFor();
+      assert.equal(await pairingButton.count(), 1);
+      await pairingButton.click();
+      await page.getByText(/Kopplung fehlgeschlagen|Pairing failed/).waitFor();
+      await page.evaluate(() =>
+        document.querySelector("body > section:last-child").remove(),
+      );
+    }
     // On Android the browser toolbar can shrink the visual viewport without
     // changing the 100vh layout viewport. A Desktop-shell wrapper must follow
     // the same height as #root, or menus and the composer end up below it.

@@ -166,11 +166,13 @@
         /Sicherheitsanforderungen konnten nicht gepr[üu]ft werden/i.test(value);
       const english = /couldn.t check security requirements/i.test(value);
       const germanEmptyState =
-        /Ger[äa]t hinzuf[üu]gen, um diesen PC per Fernzugriff zu steuern/i.test(
+        /Ger[äa]t hinzuf[üu]gen, um diesen PC per Fernzugriff zu steuern|Steuere diesen PC [üu]ber dein Smartphone oder ein anderes Ger[äa]t/i.test(
           value,
         );
       const englishEmptyState =
-        /add a device to control this (?:PC|computer) remotely/i.test(value);
+        /add(?: a)? device to control this (?:PC|computer) remotely|control this (?:PC|computer) from your phone or other device/i.test(
+          value,
+        );
       if (!german && !english && !germanEmptyState && !englishEmptyState)
         continue;
       const anchor = walker.currentNode.parentElement;
@@ -180,7 +182,9 @@
         for (let depth = 0; depth < 4 && container; depth++) {
           const addButton = [...container.querySelectorAll("button")].find(
             (candidate) =>
-              /^(Hinzuf[üu]gen|Add)$/i.test(candidate.textContent.trim()),
+              /^(Hinzuf[üu]gen|Add|Einrichten|Set up)$/i.test(
+                candidate.textContent.trim(),
+              ),
           );
           if (addButton) {
             placement = addButton;
