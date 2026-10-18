@@ -133,8 +133,23 @@ test(
         await page
           .getByText("What type of work do you do?", { exact: true })
           .isVisible()
-      )
-        await page.getByRole("button", { name: "Skip", exact: true }).click();
+      ) {
+        for (let step = 0; step < 8; step++) {
+          const skip = page
+            .getByRole("button", {
+              name: /^(Skip|Skip setup|Skip for now|Not now)$/i,
+            })
+            .last();
+          if (!(await skip.isVisible())) break;
+          const before = await page.locator("body").innerText();
+          await skip.click();
+          await until(
+            async () => (await page.locator("body").innerText()) !== before,
+            "optional onboarding advances",
+            10000,
+          );
+        }
+      }
       await page.evaluate(
         (id) =>
           window.dispatchEvent(

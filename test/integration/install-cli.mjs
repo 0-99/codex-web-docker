@@ -6,12 +6,40 @@ import path from "node:path";
 
 // Only public, pinned packages are downloaded here. Test data is created later,
 // inside a network namespace with loopback as its only interface.
-const source = await fs.readFile("nix/codex/default.nix", "utf8");
+let source = await fs.readFile("nix/codex/default.nix", "utf8");
 const baseline = process.argv[2] === "baseline";
-const version = baseline ? "0.153.3" : source.match(/version = "([^"]+)"/)?.[1];
-const hash = baseline
-  ? "UFktUtFpRhX5zPPKUEMrtFIal8vJOqLDl2j6ZZ24FbU="
-  : source.match(/x86_64-linux = \{[\s\S]*?hash = "sha256-([^"]+)"/)?.[1];
+if (baseline) {
+  const current = source.match(/version = "([^"]+)"/)?.[1];
+  const history = execFileSync(
+    "git",
+    ["log", "--first-parent", "--format=%H", "--", "nix/codex/default.nix"],
+    { encoding: "utf8" },
+  )
+    .trim()
+    .split("\n");
+  let previous;
+  for (const revision of history) {
+    const candidate = execFileSync(
+      "git",
+      ["show", `${revision}:nix/codex/default.nix`],
+      { encoding: "utf8" },
+    );
+    const version = candidate.match(/version = "([^"]+)"/)?.[1];
+    if (version && version !== current) {
+      previous = candidate;
+      break;
+    }
+  }
+  assert.ok(
+    previous,
+    "Checkout full history to locate the previous distinct CLI pin",
+  );
+  source = previous;
+}
+const version = source.match(/version = "([^"]+)"/)?.[1];
+const hash = source.match(
+  /x86_64-linux = \{[\s\S]*?hash = "sha256-([^"]+)"/,
+)?.[1];
 assert.ok(version && hash, "locate the pinned Linux CLI version and checksum");
 const directory = path.resolve("scratch/integration-cli", version);
 await fs.mkdir(directory, { recursive: true });
