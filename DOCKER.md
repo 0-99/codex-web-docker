@@ -302,3 +302,15 @@ Docker Hub for all supported platforms. Configure these repository secrets:
 
 Publishing a GitHub release produces the release tag and the Docker metadata
 action's matching tags, including `latest` for a stable semantic version.
+
+### App-server image compatibility checks
+
+`test/integration/images.json` pins the required companion-image test to
+`ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
+creation, saved history, restart/reconnect, mobile layout, reload and the offline
+pairing flow. The job summary reports its pulled digest and actual CLI version.
+The separate `candidate` case probes a prospective update (initially `:latest`)
+and is advisory. A candidate failure does not change the supported pin or any
+deployment. Propose image upgrades by changing the candidate first, then promote
+a verified version to the supported pin in a PR. Its required tests gate image
+publication. Live OpenAI enrollment and phone sign-in remain outside the suite.

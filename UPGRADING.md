@@ -117,7 +117,7 @@ For the external app-server integration, verify these invariants after a merge:
    the actual extracted Desktop in Playwright, rather than a modeled layout,
    and exercises persisted chats, mobile resizing, process restart recovery
    and the real connection screen's pairing action.
-6. Release publication also calls that workflow. Both CLI versions and all
+6. Release publication also calls that workflow. Both binary CLI versions, the supported container image and all
    Docker platform checks must pass before the image publishing job can run.
    Routine updates do not require repeating manual phone checks.
 
@@ -138,6 +138,30 @@ architecture, checks initialization with an unavailable app-server, verifies
 finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
 
 ### Offline integration CI
+
+The required container baseline is recorded in `test/integration/images.json`:
+`ghcr.io/icoretech/codex-docker:0.155.1`. The workflow executes the pulled image
+with its normal entrypoint and verifies `codex-cli 0.155.1`; it does not extract
+and substitute a host binary. The job summary records the immutable digest and
+reported CLI version. The image runs as the runner UID with a fresh test home
+and the repository mounted at the identical absolute path.
+
+The same file defines a separate upgrade candidate, initially `:latest`. That
+matrix case is explicitly advisory (`continue-on-error`) because newer images
+may be incompatible. Its failure remains visible in its job, diagnostics and
+summary, but does not invalidate the supported baseline or promote the image.
+To propose an update, set a candidate tag, review its results, then change the
+supported image and expected CLI version in a PR. The supported case must pass
+before Docker publication. Never replace the supported tag with `latest`.
+
+Container cases create a network namespace using a Docker container with
+`--network none`. The host test runner joins that namespace; each actual CLI
+container joins it too. Only loopback connects the CLI, local model fixture and
+browser/backend. Docker's daemon remains outside the namespace for lifecycle
+operations, and downloaded images are referenced by digest during execution.
+A restart stops the real CLI container and launches another with the same test
+home so the persistence checks also cover container lifecycle.
+
 
 `.github/workflows/integration.yml` prepares the actual Desktop and downloads
 checksum-pinned CLI packages for the previous distinct version from Git history

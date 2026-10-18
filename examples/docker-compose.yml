@@ -1,7 +1,7 @@
 # Example deployment for the CLI-free Codex Web frontend.
 # The Codex CLI and `codex app-server` run separately from this service. They
 # may run in another container, natively on the host, or on a reachable system.
-# `ghcr.io/icoretech/codex-docker:latest` is one possible companion image, not
+# `ghcr.io/icoretech/codex-docker:0.155.1` is one possible companion image, not
 # a required dependency. Any other image can be used if it provides a compatible
 # `codex app-server` over ws://, wss://, or a shared Unix socket.
 
