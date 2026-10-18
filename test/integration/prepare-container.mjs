@@ -15,6 +15,7 @@ function docker(args) {
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
 }
+let socketInit;
 if (selected === "supported") {
   const compose = JSON.parse(
     docker([
@@ -33,6 +34,13 @@ if (selected === "supported") {
     image,
     "Example Compose must use the supported image from images.json",
   );
+  socketInit = compose.services["codex-socket-init"];
+  assert.equal(socketInit.image, image);
+  assert.deepEqual(compose.services["codex-app-server"].command, [
+    "app-server",
+    "--listen",
+    "unix:///run/codex/app-server.sock",
+  ]);
 }
 docker(["pull", image]);
 const inspected = JSON.parse(docker(["image", "inspect", image]))[0];
@@ -51,6 +59,46 @@ const version = docker([
 if (expectedCliVersion)
   assert.equal(version, `codex-cli ${expectedCliVersion}`);
 console.log(`${selected}: ${image}\nDigest: ${digest}\n${version}`);
+if (socketInit) {
+  const volume = `codex-ci-socket-${process.pid}`;
+  docker(["volume", "create", volume]);
+  try {
+    docker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--user",
+      socketInit.user,
+      "--volume",
+      `${volume}:/run/codex`,
+      "--entrypoint",
+      socketInit.entrypoint[0],
+      digest,
+      ...socketInit.entrypoint.slice(1),
+      ...socketInit.command,
+    ]);
+    docker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--volume",
+      `${volume}:/run/codex`,
+      "--entrypoint",
+      "/bin/sh",
+      digest,
+      "-ec",
+      'test "$(id -u)" = 1000 && test "$(stat -c %a /run/codex)" = 700 && test -w /run/codex',
+    ]);
+    console.log(
+      "Compose socket initialization verified with the image's default UID 1000",
+    );
+  } finally {
+    docker(["volume", "rm", volume]);
+  }
+}
+
 const anchor = `codex-ci-network-${selected}`;
 docker([
   "run",

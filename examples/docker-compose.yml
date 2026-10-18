@@ -15,10 +15,10 @@ services:
     restart: unless-stopped
 
     environment:
-      # The default assumes an app-server container named `codex-app-server` on
-      # the shared `codex` network. Set another reachable endpoint as needed.
+      # The optional companion below shares a private Unix socket with this service.
+      # Set another reachable endpoint when managing the app-server separately.
       # Accepted transports are ws://, wss://, and unix:///absolute/socket/path.
-      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
+      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-unix:///run/codex/app-server.sock}
 
       # Optional URL path below which the complete web application is served.
       # Keep `/` for a dedicated host name, or use a path ending in `/`, such as
@@ -44,6 +44,7 @@ services:
     volumes:
       # Web settings and local state; fresh named volumes inherit UID/GID 1000.
       - codex-web-home:/home/node/.codex
+      - codex-app-server-socket:/run/codex
       # The app-server must access this workspace at the identical absolute path
       # /workspace, whether it runs in a container or natively on the host.
       - ${WORKSPACE_PATH:-./workspace}:/workspace
@@ -54,6 +55,19 @@ services:
       # optional Desktop cloud features are unavailable; see DOCKER.md.
       - codex
 
+  # Prepare only the shared socket directory. Both runtime images use UID 1000;
+  # no account state or workspace is mounted in this short-lived root container.
+  codex-socket-init:
+    profiles: [app-server]
+    image: ghcr.io/icoretech/codex-docker:0.155.1
+    user: "0:0"
+    network_mode: none
+    entrypoint: ["/bin/sh", "-ec"]
+    command: ["chown 1000:1000 /run/codex && chmod 0700 /run/codex"]
+    volumes:
+      - codex-app-server-socket:/run/codex
+    restart: "no"
+
   # Optional companion: enable with `docker compose --profile app-server up -d`.
   # Keep this tag aligned with test/integration/images.json's supported image.
   codex-app-server:
@@ -62,15 +76,19 @@ services:
     container_name: codex-app-server
     init: true
     restart: unless-stopped
-    command: [app-server, --listen, "ws://0.0.0.0:4500"]
+    depends_on:
+      codex-socket-init:
+        condition: service_completed_successfully
+    command: [app-server, --listen, "unix:///run/codex/app-server.sock"]
     environment:
       CODEX_HOME: /home/codex/.codex
     volumes:
       - codex-cli-home:/home/codex/.codex
+      - codex-app-server-socket:/run/codex
       - ${WORKSPACE_PATH:-./workspace}:/workspace
     networks:
       - codex
-    # No published port: only services on the shared private network can reach it.
+    # No TCP listener or published app-server port; access is through the socket.
 
 networks:
   # Deliberately use a user-defined bridge network instead of host networking
@@ -86,3 +104,4 @@ networks:
 volumes:
   codex-web-home:
   codex-cli-home:
+  codex-app-server-socket:

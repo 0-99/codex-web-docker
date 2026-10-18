@@ -162,7 +162,10 @@ container joins it too. Only loopback connects the CLI, local model fixture and
 browser/backend. Docker's daemon remains outside the namespace for lifecycle
 operations, and downloaded images are referenced by digest during execution.
 A restart stops the real CLI container and launches another with the same test
-home so the persistence checks also cover container lifecycle.
+home so the persistence checks also cover container lifecycle. Container cases
+use the real CLI Unix listener, matching the Compose service and exercising
+owner-only socket access. The Compose helper initializes the dedicated socket
+volume for UID 1000 in both runtime images; account homes stay separate.
 
 
 `.github/workflows/integration.yml` prepares the actual Desktop and downloads

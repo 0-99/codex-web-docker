@@ -26,19 +26,16 @@ Set `CODEX_APP_SERVER_URL` to one of these endpoints:
 - `wss://codex-app-server.example:4500` for a TLS WebSocket listener; or
 - `unix:///run/codex/app-server.sock` for a shared Unix socket.
 
-For example, the external Codex container can start its server with:
+The example below uses a shared Unix socket. Recent CLI versions reject an
+unauthenticated non-loopback WebSocket listener (such as `ws://0.0.0.0:4500`).
+The bridge does not currently configure the CLI's `--ws-auth` credentials; use
+the Unix-socket setup for the companion image rather than an unprotected TCP
+listener. Compatible WebSocket endpoints and authenticating relays remain usable.
 
-```sh
-codex app-server --listen ws://0.0.0.0:4500
-```
-
-Keep the app-server endpoint private and do not expose it to the internet. When
-the app-server runs in another container, both containers should join the same
-private Docker network. A native app-server can instead use an address that is
-reachable from the web container or a Unix socket whose directory is mounted
-into the container. The WebSocket network transport is currently marked
-experimental upstream; a shared Unix socket is the more conservative option
-when both processes run on the same host.
+Keep the app-server endpoint private. When using a Unix socket, the frontend and
+app-server must use matching numeric UIDs so the frontend can connect to the
+CLI's owner-only socket. The example initializes the dedicated socket volume
+for UID 1000; account state remains in a separate app-server home volume.
 
 For a Unix socket, mount the same directory or named volume in both containers,
 start the server with an absolute socket path, and configure the web container:
@@ -307,8 +304,9 @@ action's matching tags, including `latest` for a stable semantic version.
 
 The actual `0.155.1` image passed the full offline integration suite on
 2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39133090483).
-This validates the covered local workflows; live account enrollment and known
-failures outside those workflows need their own regression cases.
+This validates the covered local workflows. Shell-tool execution inside the
+CLI sandbox, live account enrollment and known failures outside these flows
+need separate regression cases; see the container sandbox configuration above.
 
 The [example Compose file](examples/docker-compose.yml) includes the optional
 `codex-app-server` service pinned to `ghcr.io/icoretech/codex-docker:0.155.1`.
@@ -323,15 +321,16 @@ Use an existing `codex` network if already created. Without that profile, the
 frontend continues to use an independently managed app-server. Both services
 mount the same workspace path and keep separate persistent home volumes. Sign
 the app-server into your account separately; the example contains no credentials.
-The optional service uses private WebSocket transport; Mobile Connect's fallback
-pairing action requires the shared Unix-socket setup described above.
-
+The optional service uses the shared Unix socket required by Mobile Connect's
+fallback pairing action. A short-lived `codex-socket-init` service prepares its
+permissions before the CLI starts; it has no network, workspace or account data.
 
 `test/integration/images.json` pins the required companion-image test to
 `ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
 pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
-checks that the example Compose service matches this supported image pin.
+checks that both Compose services match this supported image pin and executes
+the socket initializer to verify owner-only access for the image's default UID.
 The separate `candidate` case probes a prospective update (initially `:latest`)
 and is advisory. A candidate failure does not change the supported pin or any
 deployment. Propose image upgrades by changing the candidate first, then promote
