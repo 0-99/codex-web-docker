@@ -21,6 +21,12 @@ env:
   DOCKER_IMAGE: 0to99/codex-web-docker
 
 jobs:
+  integration:
+    name: Test real Desktop and app-server
+    uses: ./.github/workflows/integration.yml
+    permissions:
+      contents: read
+
   smoke_test:
     name: Smoke-test every supported platform
     uses: ./.github/workflows/docker-smoke.yml
@@ -29,7 +35,7 @@ jobs:
 
   push_to_registry:
     name: Push Docker image to Docker Hub
-    needs: smoke_test
+    needs: [smoke_test, integration]
     runs-on: ubuntu-latest
     permissions:
       contents: read

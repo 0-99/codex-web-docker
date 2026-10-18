@@ -1,0 +1,51 @@
+name: Test real Desktop and app-server offline
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+jobs:
+  integration:
+    name: Real Desktop with ${{ matrix.cli }} CLI
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        cli: [baseline, upstream]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm rebuild sharp better-sqlite3
+      - run: npm run prepare
+      - run: node test/integration/install-cli.mjs ${{ matrix.cli }}
+      - run: npx playwright install --with-deps chromium
+      - name: Test with loopback networking only
+        shell: bash
+        run: |
+          set -euo pipefail
+          integration_user="$(id -un)"
+          integration_node="$(command -v node)"
+          sudo unshare --net -- /bin/bash -c '
+            set -euo pipefail
+            ip link set lo up
+            exec runuser -u "$1" -- env "PATH=$2" "CODEX_TEST_CLI_PATH=$3" \
+              CODEX_TEST_NETWORK_ISOLATED=1 CODEX_TEST_PAIRING=1 \
+              "$4" --test --test-concurrency=1 \
+              test/integration/app-server.mjs test/integration/desktop.mjs
+          ' integration "$integration_user" "$PATH" "$CODEX_TEST_CLI_PATH" "$integration_node"
+      - name: Keep failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.cli }}
+          path: scratch/integration-results/
+          if-no-files-found: ignore

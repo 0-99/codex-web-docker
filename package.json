@@ -25,7 +25,8 @@
     "test:base-path-server": "npm run build:server && node --test test/base-path-server.test.mjs",
     "test:docker-proxy": "node --test test/codex-app-server-proxy.test.mjs test/proxy-recovery.test.mjs test/retry-policy.test.mjs",
     "test": "npm run build:server && node --experimental-strip-types --test test/*.test.mjs",
-    "test:browser-runtime": "npm run build:server && node --test test/browser/*.mjs"
+    "test:browser-runtime": "npm run build:server && node --test test/browser/*.mjs",
+    "test:integration": "node --test --test-concurrency=1 test/integration/app-server.mjs test/integration/desktop.mjs"
   },
   "repository": "https://github.com/0-99/codex-web-docker.git",
   "author": "martin <martincharles07@gmail.com>",
