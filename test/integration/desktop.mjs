@@ -115,11 +115,40 @@ test(
     page.on("pageerror", (e) => errors.push(e.message));
     try {
       await page.goto(base + "thread/" + threadId);
+      // Fresh Desktop state can open its first-run occupation wizard. Complete
+      // that normal UI step, then restore the requested local thread route.
+      await until(
+        async () =>
+          (await page
+            .getByText("What type of work do you do?", { exact: true })
+            .isVisible()) ||
+          (await page
+            .getByText("CI assistant response 1", { exact: true })
+            .first()
+            .isVisible()),
+        "Desktop first-run screen or saved chat",
+        45000,
+      );
+      if (
+        await page
+          .getByText("What type of work do you do?", { exact: true })
+          .isVisible()
+      )
+        await page.getByRole("button", { name: "Skip", exact: true }).click();
+      await page.evaluate(
+        (id) =>
+          window.dispatchEvent(
+            new MessageEvent("message", {
+              data: { type: "navigate-to-route", path: `/local/${id}` },
+            }),
+          ),
+        threadId,
+      );
       await page
         .getByText("CI assistant response 1", { exact: true })
         .first()
         .waitFor({ timeout: 45000 });
-      const composer = page.locator('[contenteditable="true"]').first();
+      const composer = page.locator('[contenteditable="true"]:visible').first();
       await composer.waitFor({ timeout: 45000 });
       await composer.fill(
         "Continue the saved conversation in the real browser.",
@@ -141,6 +170,23 @@ test(
         await composer.innerText(),
         "Draft retained across mobile resizing",
       );
+      // A mobile toolbar/keyboard can shrink only the visual viewport while
+      // the Desktop's 100vh layout stays tall. Exercise that real root layout.
+      await page.evaluate(() => {
+        Object.defineProperty(window.visualViewport, "height", {
+          configurable: true,
+          value: 400,
+        });
+        window.visualViewport.dispatchEvent(new Event("resize"));
+      });
+      await until(async () => {
+        const b = await composer.boundingBox();
+        return b && b.y >= 0 && b.y + b.height <= 401;
+      }, "composer follows the visual viewport");
+      await page.evaluate(() => {
+        delete window.visualViewport.height;
+        window.visualViewport.dispatchEvent(new Event("resize"));
+      });
       for (const viewport of [
         { width: 393, height: 380 },
         { width: 800, height: 393 },

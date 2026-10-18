@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import http from "node:http";
@@ -261,6 +261,33 @@ export async function appServerFixture(t) {
   const workspace = path.join(directory, "workspace");
   await fs.mkdir(codexHome);
   await fs.mkdir(workspace);
+  const schemaDirectory = path.join(directory, "schema");
+  execFileSync(
+    binary,
+    [
+      "app-server",
+      "generate-json-schema",
+      "--experimental",
+      "--out",
+      schemaDirectory,
+    ],
+    {
+      env: { ...process.env, CODEX_HOME: codexHome },
+      timeout: 10000,
+    },
+  );
+  const schema = JSON.parse(
+    await fs.readFile(path.join(schemaDirectory, "ClientRequest.json"), "utf8"),
+  );
+  for (const method of ["remoteControl/enable", "remoteControl/pairing/start"])
+    assert.ok(
+      JSON.stringify(schema).includes(`"${method}"`),
+      `CLI supports ${method}`,
+    );
+  assert.ok(schema.definitions.RemoteControlEnableParams.properties.ephemeral);
+  assert.ok(
+    schema.definitions.RemoteControlPairingStartParams.properties.manualCode,
+  );
   const model = await modelServer();
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
