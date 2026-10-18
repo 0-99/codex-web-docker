@@ -234,7 +234,7 @@ test(
       await page.evaluate(() =>
         window.dispatchEvent(
           new MessageEvent("message", {
-            data: { type: "navigate-to-route", path: "/settings/connections" },
+            data: { type: "navigate-to-route", path: "/settings/connections/computer" },
           }),
         ),
       );

@@ -112,6 +112,7 @@ jobs:
           docker run --detach \
             --name "$container_name" \
             --env CODEX_APP_SERVER_URL=ws://127.0.0.1:9 \
+            --env CODEX_WEB_ELECTRON_DEBUG=1 \
             --env CODEX_APP_SERVER_RECONNECT_ATTEMPTS=0 \
             --env CODEX_APP_SERVER_RECONNECT_BACKOFF_ATTEMPTS=0 \
             codex-web-docker:smoke-${{ matrix.tag_suffix }}
