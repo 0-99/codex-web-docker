@@ -432,7 +432,8 @@ electronShim.overrideAdapter = {
     };
   },
   getGateOverride(evaluation) {
-    if (evaluation.name === "2911712394") {
+    // Keep the external-host connection settings available without Statsig.
+    if (evaluation.name === "4114442250") {
       return {
         ...evaluation,
         value: true,

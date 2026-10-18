@@ -779,6 +779,9 @@ export async function startIpcBridgeServer(
 }
 
 async function main(args: string[]) {
+  // Linux treats PID 1 specially: install a handler so the Docker entrypoint
+  // honors the proxy's terminate-parent action as well as docker stop.
+  process.once("SIGTERM", () => process.exit(143));
   const options = parseServerArgs(args);
 
   await startIpcBridgeServer(options);
