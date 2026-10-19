@@ -1,69 +1,128 @@
-# Example deployment for the CLI-free Codex Web frontend.
-# The Codex CLI and `codex app-server` run separately from this service. They
-# may run in another container, natively on the host, or on a reachable system.
-# `ghcr.io/icoretech/codex-docker:latest` is one possible companion image, not
-# a required dependency. Any other image can be used if it provides a compatible
-# `codex app-server` over ws://, wss://, or a shared Unix socket.
+# Standalone Codex stack: `docker compose -f examples/docker-compose.yml up -d`
+# CLI image: https://github.com/icoretech/codex-docker
+# Web fork:  https://github.com/0-99/codex-web-docker
+# Web image: https://hub.docker.com/r/0to99/codex-web-docker
+#
+# First start (one-time account setup, credentials stay in codex_data):
+#   docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap device-auth
+#   docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap status
+#   docker compose -f examples/docker-compose.yml exec codex-cli codex
+# In the interactive CLI, trust /workspace when prompted. Then open
+# http://127.0.0.1:8214/ (or the configured CODEX_WEB_BASE_PATH).
+# No existing networks, named volumes, reverse proxy or MCP tokens are required.
 
 services:
-  codex-web:
-    image: 0to99/codex-web-docker:latest
-    container_name: codex-web
-
-    # Adds a small PID 1 that forwards stop signals and reaps child processes.
+  codex-cli:
+    # Keep this version aligned with test/integration/images.json's supported image.
+    image: ghcr.io/icoretech/codex-docker:0.155.1
     init: true
     restart: unless-stopped
+    working_dir: /workspace
+
+    # Bubblewrap needs namespace syscalls and its own /proc mount. These options
+    # remove Docker's extra seccomp/system-path restrictions for the CLI only.
+    # They do not grant SYS_ADMIN. Keep the web service's default restrictions.
+    security_opt:
+      - seccomp=unconfined
+      - systempaths=unconfined
+      # Only add this if the host's AppArmor policy actually blocks bubblewrap:
+      # - apparmor=unconfined
 
     environment:
-      # The default assumes an app-server container named `codex-app-server` on
-      # the shared `codex` network. Set another reachable endpoint as needed.
-      # Accepted transports are ws://, wss://, and unix:///absolute/socket/path.
-      CODEX_APP_SERVER_URL: ${CODEX_APP_SERVER_URL:-ws://codex-app-server:4500}
-
-      # Optional URL path below which the complete web application is served.
-      # Keep `/` for a dedicated host name, or use a path ending in `/`, such as
-      # `/my/example/subdir/`. The reverse proxy must preserve this prefix.
-      CODEX_WEB_BASE_PATH: ${CODEX_WEB_BASE_PATH:-/}
-
-      # Optional connection limits and their defaults:
-      # CODEX_APP_SERVER_MAX_PAYLOAD: 104857600
-      # CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: 10000
-
-      # Initial connection immediately, then 10s, 10s, 20s, 30s; repeat the last delay.
-      CODEX_APP_SERVER_RETRY_DELAYS_MS: ${CODEX_APP_SERVER_RETRY_DELAYS_MS:-10000,10000,20000,30000}
-      # 0 means keep waiting indefinitely (also during initial startup).
-      CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS: ${CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS:-0}
-      # Optional: CODEX_APP_SERVER_RESUME_TIMEOUT_MS: 30000
-      # Optional: CODEX_WEB_ELECTRON_DEBUG: "1"
-
-    ports:
-      # Bind only to the Docker host for local access. Remove this mapping when
-      # a reverse proxy reaches codex-web through a shared Docker network.
-      - "127.0.0.1:8214:8214"
+      CODEX_HOME: /home/codex/.codex
+      # Optional: pass a credential to an MCP server configured separately.
+      # Replace MCP_API_TOKEN with the environment variable that server expects
+      # and set its value in your local .env/stack environment.
+      # MCP_API_TOKEN: ${MCP_API_TOKEN:-}
 
     volumes:
-      # Web settings and local state; fresh named volumes inherit UID/GID 1000.
-      - codex-web-home:/home/node/.codex
-      # The app-server must access this workspace at the identical absolute path
-      # /workspace, whether it runs in a container or natively on the host.
-      - ${WORKSPACE_PATH:-./workspace}:/workspace
+      - codex_data:/home/codex/.codex
+      - codex_workspace:/workspace
+      # Projectless Desktop chats use this absolute path. Both containers must
+      # see the same workspace here as well as at /workspace.
+      - codex_workspace:/home/node/Documents/Codex
+      - codex_socket:/run/codex
 
     networks:
-      # Core operation through the external app-server does not require direct
-      # internet access from this container. On an internal-only network,
-      # optional Desktop cloud features are unavailable; see DOCKER.md.
-      - codex
+      - cli_egress
+      - cli_internal
+    extra_hosts:
+      # Optional access to services on the Docker host, e.g. an MCP endpoint.
+      - "host.docker.internal:host-gateway"
 
-networks:
-  # Deliberately use a user-defined bridge network instead of host networking
-  # or Docker's shared default `bridge`. It provides isolation and DNS-based
-  # container-name resolution for the app-server connection.
-  # Create it once with `docker network create --driver bridge codex`, or as an
-  # external bridge network in Portainer. A containerized app-server must join
-  # this network too; a native or remote app-server only needs to be reachable.
-  codex:
-    name: codex
-    external: true
+    # The web service reaches this socket through the shared volume, not TCP.
+    command: [app-server, --listen, "unix:///run/codex/app-server.sock"]
+    healthcheck:
+      test: [CMD-SHELL, "test -S /run/codex/app-server.sock"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+    stdin_open: true
+    tty: true
+
+  codex-web:
+    # CLI-free frontend; the CLI runs only in the separate service above.
+    image: 0to99/codex-web-docker:latest
+    init: true
+    restart: unless-stopped
+    # Start the CLI container first, without requiring it to be healthy. The
+    # frontend stays available and shows reconnect status while the CLI is down.
+    depends_on:
+      codex-cli:
+        condition: service_started
+
+    environment:
+      CODEX_APP_SERVER_URL: unix:///run/codex/app-server.sock
+      # For a reverse-proxy subpath, e.g. /my/example/subdir/, set this variable
+      # and forward the prefix unchanged. The standalone default is /.
+      CODEX_WEB_BASE_PATH: ${CODEX_WEB_BASE_PATH:-/}
+      CODEX_APP_SERVER_RETRY_DELAYS_MS: ${CODEX_APP_SERVER_RETRY_DELAYS_MS:-10000,10000,20000,30000}
+      # 0 means keep waiting indefinitely, including during initial startup.
+      CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS: ${CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS:-0}
+      # Optional transport settings:
+      # CODEX_APP_SERVER_MAX_PAYLOAD: "104857600"
+      # CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "10000"
+      # CODEX_APP_SERVER_RESUME_TIMEOUT_MS: "30000"
+      # CODEX_WEB_ELECTRON_DEBUG: "1"
+
+    volumes:
+      - codex_web_data:/home/node/.codex
+      - codex_workspace:/workspace
+      - codex_workspace:/home/node/Documents/Codex
+      - codex_socket:/run/codex
+    ports:
+      # Ready for local use without a reverse proxy. Authenticate the web UI
+      # at your proxy/VPN before exposing it beyond a trusted network.
+      - "127.0.0.1:8214:8214"
+    networks:
+      - web_access
 
 volumes:
-  codex-web-home:
+  # Compose creates project-scoped, persistent account/settings/workspace volumes.
+  # Existing installation-specific volume names are deliberately not assumed.
+  codex_data:
+  codex_web_data:
+  codex_workspace:
+  # Transient socket state only. Both runtime images use UID/GID 1000.
+  # Docker creates the mount with usable ownership; no root helper is needed.
+  codex_socket:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=64k,uid=1000,gid=1000,mode=0770"
+
+networks:
+  # Only the CLI gets outbound connectivity for OpenAI and external MCP servers.
+  cli_egress:
+    driver: bridge
+  # Optional internal MCP/sidecar services can join this Compose-managed network.
+  cli_internal:
+    driver: bridge
+    internal: true
+  # Frontend has no independent internet access. A reverse proxy can optionally
+  # join this network; the localhost port above works without one.
+  web_access:
+    driver: bridge
+    internal: true

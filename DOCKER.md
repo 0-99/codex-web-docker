@@ -26,19 +26,16 @@ Set `CODEX_APP_SERVER_URL` to one of these endpoints:
 - `wss://codex-app-server.example:4500` for a TLS WebSocket listener; or
 - `unix:///run/codex/app-server.sock` for a shared Unix socket.
 
-For example, the external Codex container can start its server with:
+The example below uses a shared Unix socket. Recent CLI versions reject an
+unauthenticated non-loopback WebSocket listener (such as `ws://0.0.0.0:4500`).
+The bridge does not currently configure the CLI's `--ws-auth` credentials; use
+the Unix-socket setup for the companion image rather than an unprotected TCP
+listener. Compatible WebSocket endpoints and authenticating relays remain usable.
 
-```sh
-codex app-server --listen ws://0.0.0.0:4500
-```
-
-Keep the app-server endpoint private and do not expose it to the internet. When
-the app-server runs in another container, both containers should join the same
-private Docker network. A native app-server can instead use an address that is
-reachable from the web container or a Unix socket whose directory is mounted
-into the container. The WebSocket network transport is currently marked
-experimental upstream; a shared Unix socket is the more conservative option
-when both processes run on the same host.
+Keep the app-server endpoint private. When using a Unix socket, the frontend and
+app-server must use matching numeric UIDs so the frontend can connect to the
+CLI's owner-only socket. The example initializes the dedicated socket volume
+for UID 1000; account state remains in a separate app-server home volume.
 
 For a Unix socket, mount the same directory or named volume in both containers,
 start the server with an absolute socket path, and configure the web container:
@@ -96,7 +93,7 @@ addition to these delays. The sequence resets after successful recovery.
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
 `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS=8` make one initial attempt and at most eight
 retries, waiting 5 seconds before the first retry and 15 seconds thereafter.
-The proxy still enforces a timeout on each attempt. Desktop `26.901.41123`
+The proxy still enforces a timeout on each attempt. Desktop `26.1007.30912`
 keeps local stdio initialization pending after its diagnostic timeout, so no
 fork timeout patch is needed. Other transports retain upstream behavior.
 Upstream also reloads browser tabs after a lost browser-to-backend IPC
@@ -148,6 +145,28 @@ unreachable, so a selected non-English locale also applies to the Desktop UI.
 The connection panel currently has German and English text selected from the
 browser language.
 
+## Upgrading the web image
+
+The bundled Desktop is `26.1007.30912`. Updating this image replaces the web
+interface and bridge; it does not update the independently managed app-server.
+The upstream Nix package now pins CLI `0.162.0-alpha.17.2`, but that alpha CLI
+is not included in the Docker image and is not an automatic upgrade requirement
+for an existing deployment. Check the actual app-server version in the test
+stack before deciding whether a separate CLI upgrade is needed.
+
+Keep the current endpoint, base path, networks and persistent volumes. Back up
+web-side state before testing the newer Desktop, and retain the previous image
+tag for rollback. CI automatically checks new and resumed chats, app-server
+restart recovery, the actual mobile composer and the pairing-code path before
+image publication. The pairing action is available beside **Add** or **Set up** in the
+local connection screen; its RPC still requires a Unix app-server endpoint.
+
+These integration checks run without internet access, using real CLI processes
+and fixed local model responses. Cloud pairing replies are simulated; signing
+a physical phone into ChatGPT is not part of the automated release checks.
+
+The web build revision now appears under the profile menu's **Help** submenu.
+
 ## Persistence and fresh volumes
 
 The Compose example mounts a named volume at `/home/node/.codex` for web-side
@@ -190,7 +209,7 @@ ownership; image initialization does not change arbitrary host directories.
 
 ## Visible web build revision
 
-Open the Help menu in the sidebar to see **Web build**. It shows the Git commit
+Open the profile menu's Help submenu to see **Web build**. It shows the Git commit
 used to build the running `codex-web` image. This identifies the web frontend
 itself, independently of the bundled Desktop version and the external Codex
 app-server version.
@@ -240,30 +259,48 @@ other cookie-based authentication gateway authorize the manifest request.
 
 ## Compose and Portainer
 
-When the app-server runs in another container on the same Docker host, create
-the external user-defined bridge network once:
+The [example](examples/docker-compose.yml) starts both `codex-cli` and
+`codex-web`, with Compose-managed networks and volumes. No existing network,
+volume, reverse proxy or MCP credentials are required:
 
 ```sh
-docker network create --driver bridge codex
+docker compose -f examples/docker-compose.yml up -d
+docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap device-auth
+docker compose -f examples/docker-compose.yml exec codex-cli codex-bootstrap status
+docker compose -f examples/docker-compose.yml exec codex-cli codex
 ```
 
-This keeps both containers off the host network while providing automatic DNS
-resolution between them. Docker's shared default `bridge` network is not used.
-General internet access from `codex-web` is not required for the core workflow
-through an external app-server. On an internal-only network, optional Desktop
-requests for feature flags, account metadata, usage and cloud tasks may log
-`sa_server_request_failed` and return `/wham/...` status 500; the app-server
-container remains responsible for Codex/OpenAI connectivity.
+Complete device authorization, then trust `/workspace` in the interactive CLI.
+Open `http://127.0.0.1:8214/`. The CLI remains available through `compose exec`.
+The frontend starts without waiting for CLI health and reconnects automatically.
+The socket healthcheck verifies listener presence, not account authorization.
 
-Then set `WORKSPACE_PATH` and, if needed, `CODEX_APP_SERVER_URL`, and deploy
-[`examples/docker-compose.yml`](examples/docker-compose.yml). The app-server
-must access project directories at the same absolute paths as `codex-web`,
-whether it runs in a container or natively; otherwise the web file picker and
-Codex will refer to different files.
+Both containers mount the same workspace at `/workspace` and
+`/home/node/Documents/Codex`, including projectless Desktop conversations.
+Account/configuration data and web state use separate persistent home volumes.
+The socket volume is a small tmpfs with UID/GID 1000 and mode 0770; it holds no
+persistent account data and needs no initialization container. Docker creates
+project-scoped resource names. Existing installation-specific volumes are not
+automatically reused: explicitly map their names in your deployment override
+if you want to retain existing data rather than start fresh.
 
-The example publishes the UI only on `127.0.0.1:8214` for local testing. For
-Nginx Proxy Manager, attach `codex-web` and Nginx Proxy Manager to a dedicated
-proxy network, remove the `ports` entry, and proxy to `codex-web:8214`.
+Only the CLI joins the outbound bridge. Its additional internal network is
+available for optional MCP/sidecar services. The frontend uses a separate
+internal network with a localhost-published port; it has no independent internet
+access. Optional Desktop account/feature/cloud requests may fail there while
+the core app-server workflow remains available. For Nginx Proxy Manager, attach
+the proxy to this project's `web_access` network, remove `ports`, and forward to
+`codex-web:8214`. Set `CODEX_WEB_BASE_PATH` for subpath hosting and forward that
+prefix unchanged. A proxy is optional for local use.
+
+The example applies `seccomp=unconfined` and `systempaths=unconfined` to the CLI
+for bubblewrap namespace and `/proc` operations; these relax Docker restrictions
+without granting `SYS_ADMIN`. AppArmor relaxation is commented out and should
+only be enabled if the host blocks the sandbox. The frontend retains Docker's
+default security settings. The commented `MCP_API_TOKEN` is a generic credential example;
+replace the variable name with the one your MCP server expects and configure
+the server separately. Passing the variable alone does not configure MCP. `host.docker.internal`
+provides host-service access through Docker's host gateway.
 
 There is deliberately no authentication inside this image. Anyone who can
 reach the UI can operate the connected Codex instance with that instance's
@@ -280,3 +317,29 @@ Docker Hub for all supported platforms. Configure these repository secrets:
 
 Publishing a GitHub release produces the release tag and the Docker metadata
 action's matching tags, including `latest` for a stable semantic version.
+
+### App-server image compatibility checks
+
+The actual `0.155.1` image passed the full offline integration suite on
+2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
+This validates the covered local workflows. Shell-tool execution inside the
+CLI sandbox, live account enrollment and known failures outside these flows
+need separate regression cases; see the container sandbox configuration above.
+
+The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
+to `ghcr.io/icoretech/codex-docker:0.155.1` and uses a shared Unix socket, also
+required by the Mobile Connect fallback. See [setup](#compose-and-portainer).
+
+`test/integration/images.json` pins the required companion-image test to
+`ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
+creation, saved history, restart/reconnect, mobile layout, reload and the offline
+pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
+checks the Compose CLI image pin, creates the configured tmpfs socket volume,
+checks its permissions with default UID 1000, starts the actual listener and
+checks both workspace aliases on a fresh named volume. Container integration
+tests also apply the CLI security options from the example.
+The separate `candidate` case probes a prospective update (initially `:latest`)
+and is advisory. A candidate failure does not change the supported pin or any
+deployment. Propose image upgrades by changing the candidate first, then promote
+a verified version to the supported pin in a PR. Its required tests gate image
+publication. Live OpenAI enrollment and phone sign-in remain outside the suite.

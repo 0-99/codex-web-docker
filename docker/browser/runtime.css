@@ -13,9 +13,11 @@
     box-sizing: border-box;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
-  /* The Desktop shell has its own 100vh wrapper inside #root. Keep it in
-     sync with the visual viewport too, including its Electron zoom factor. */
-  .zoom-adjusted-viewport {
+  /* Desktop shells use either the older viewport class or the newer app-shell
+     root with an inline 100svh height. Both must follow the visible viewport,
+     including the Electron zoom factor. Avoid the generated layout class. */
+  .zoom-adjusted-viewport,
+  #root > [style*="--app-shell-navigation-rail-width"] {
     height: calc(
       var(--codex-web-viewport-height, 100dvh) / var(--codex-window-zoom, 1)
     ) !important;

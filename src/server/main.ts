@@ -22,7 +22,6 @@ import {
   normalizeBasePath,
   pathAtBase,
 } from "./base-path";
-import { glob } from "glob";
 import { installWebRuntime } from "./web-runtime";
 import { normalizeLanguages, withBrowserLanguages } from "./electron/locale";
 
@@ -773,26 +772,16 @@ export async function startIpcBridgeServer(
     version: packageJson.version,
   };
 
-  const matches = await glob("../../scratch/asar/.vite/build/main-*.js", {
-    nodir: true,
-    cwd: __dirname,
-  });
-
-  if (matches.length === 0) {
-    throw new Error("no main bundle found");
-  }
-
-  if (matches.length > 1) {
-    throw new Error("multiple main bundles found");
-  }
-
-  const module = require(matches[0]!);
-  module.runMainAppStartup();
+  // The upstream entrypoint initializes network policy and starts the app once.
+  require(path.resolve(__dirname, "../../scratch/asar", packageJson.main));
 
   return app;
 }
 
 async function main(args: string[]) {
+  // Linux treats PID 1 specially: install a handler so the Docker entrypoint
+  // honors the proxy's terminate-parent action as well as docker stop.
+  process.once("SIGTERM", () => process.exit(143));
   const options = parseServerArgs(args);
 
   await startIpcBridgeServer(options);

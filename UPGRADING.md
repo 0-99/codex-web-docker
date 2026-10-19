@@ -40,7 +40,7 @@ sure to wait for its completion before doing validation. run it in a subagent.
 run the following to get the version of the new codex-cli
 
 ```bash
-scratch/ChatGPT.app/Contents/Resources/codex --version
+scratch/ChatGPT.app/Contents/Resources/codex-cli/bin/codex --version
 ```
 
 then update the `nix/codex/default.nix` file's `version` field and hashes to
@@ -78,25 +78,17 @@ the patches were applied as expected.
 
 ## validation
 
-to validate things are still working, we'll first validate the server, then the
-client. before starting this step, make sure to wait for the
-`upgrading the codex-cli version` subagent to finish.
+After preparing the extracted application, run `npm test`,
+`npm run build:browser` and `npm run test:browser-runtime`. Require the
+**Test real Desktop and app-server offline** workflow for both CLI versions and
+all Docker platform checks before merging. The integration workflow completes
+the real browser flows automatically; its failure artifacts contain the screen
+and HTML needed to investigate failures. See the offline CI description below
+for coverage and the external services it simulates.
 
-to validate the server, run the following
-
-```bash
-nix develop --command yarn server
-```
-
-next validate the client by opening a browser window to `http://localhost:8214`
-and validating things show up on the page.
-
-look in the console for errors. also, look on the screen to see whether any
-error dialogs popped up. sometimes errors occur, but they're silent and exhibit
-as loading taking forever (more than 1m). look out for that case too.
-
-if there are errors, bring them to the users attention and we will decide how to
-proceed.
+A manual browser or phone session is useful for diagnosing an external account
+or device problem, but is not a recurring release check. Keep failed checks
+blocking until their cause is resolved.
 
 ## Maintaining this Docker/web fork
 
@@ -121,16 +113,13 @@ For the external app-server integration, verify these invariants after a merge:
 4. Check the pinned app-server protocol for `initialize` + `initialized`,
    `thread/resume` parameters and thread lifecycle notifications. Preserve
    session configuration without replaying start/fork/history payloads.
-5. Inspect the real Desktop root/chat layout when changing viewport-related
-   selectors. The browser regression fixture checks viewport behavior, but a
-   real Android/iOS keyboard remains a useful deployment smoke check.
-6. After merging an upgrade, publish the usual tagged GitHub Release and wait
-   for the versioned and `latest` images on Docker Hub. Deploy the published
-   image in the test stack and open the real **Settings → Connections → Control
-   this PC** screen. Confirm **Generate pairing code** appears beside **Add**,
-   then request a code against a compatible app-server. The browser fixture
-   uses modeled markup and cannot detect an upstream copy or DOM change. Mark
-   an image as `stable` only after these manual checks succeed.
+5. Require the **Test real Desktop and app-server offline** workflow. It opens
+   the actual extracted Desktop in Playwright, rather than a modeled layout,
+   and exercises persisted chats, mobile resizing, process restart recovery
+   and the real connection screen's pairing action.
+6. Release publication also calls that workflow. Both binary CLI versions, the supported container image and all
+   Docker platform checks must pass before the image publishing job can run.
+   Routine updates do not require repeating manual phone checks.
 
 Validation (after preparing the extracted application):
 
@@ -147,6 +136,63 @@ countdowns, recovery, draft preservation and mobile/desktop viewport sizing in
 a small chat-layout fixture. Docker CI additionally builds every supported
 architecture, checks initialization with an unavailable app-server, verifies
 finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
+
+### Offline integration CI
+
+The required container baseline is recorded in `test/integration/images.json`:
+`ghcr.io/icoretech/codex-docker:0.155.1`. The workflow executes the pulled image
+with its normal entrypoint and verifies `codex-cli 0.155.1`; it does not extract
+and substitute a host binary. The job summary records the immutable digest and
+reported CLI version. The image runs as the runner UID with a fresh test home
+and the repository mounted at the identical absolute path.
+
+The same file defines a separate upgrade candidate, initially `:latest`. That
+matrix case is explicitly advisory (`continue-on-error`) because newer images
+may be incompatible. Its failure remains visible in its job, diagnostics and
+summary, but does not invalidate the supported baseline or promote the image.
+To propose an update, set a candidate tag, review its results, then change the
+supported image and expected CLI version in a PR; update the CLI service
+in `examples/docker-compose.yml` and the README reference at the same time.
+CI validates the standalone Compose file. The supported case must pass
+before Docker publication. Never replace the supported tag with `latest`.
+
+Container cases create a network namespace using a Docker container with
+`--network none`. The host test runner joins that namespace; each actual CLI
+container joins it too. Only loopback connects the CLI, local model fixture and
+browser/backend. Docker's daemon remains outside the namespace for lifecycle
+operations, and downloaded images are referenced by digest during execution.
+A restart stops the real CLI container and launches another with the same test
+home so the persistence checks also cover container lifecycle. Container cases
+use the real CLI Unix listener, matching the Compose service and exercising
+socket access. CI creates the example's tmpfs socket volume with UID/GID 1000,
+checks its permissions and actual listener healthcheck, and verifies both
+workspace aliases on a fresh named volume. Integration containers use the
+example's CLI security options. Account homes stay separate.
+
+`.github/workflows/integration.yml` prepares the actual Desktop and downloads
+checksum-pinned CLI packages for the previous distinct version from Git history
+and the current version read from `nix/codex/default.nix`. Both pins and hashes
+follow version upgrades automatically. It then starts a new Linux
+network namespace with loopback as its only interface. Tests fail closed if
+they are invoked without that isolation. Downloads and browser installation
+happen before entering the namespace; test execution has no internet access.
+
+The real app-server uses a fresh test-only Codex home, a dummy local credential
+and a local Responses API fixture. Tests create a persistent conversation,
+complete a turn, stop and restart the app-server process, check the retained
+history and continue the same thread. No production account or paid model is
+used. The browser test loads the real Desktop beneath a nested base path,
+resumes saved history, sends a turn and checks mobile composer sizing and draft
+preservation through reconnect. Failures retain screenshots and HTML in the CI
+artifact.
+
+The pairing gateway forwards normal requests to the real CLI, while replacing
+only cloud enrollment and pairing-code creation with deterministic replies.
+Playwright must find the action in the actual connection screen and display the
+returned code. This covers our observer, HTTP route, same-origin request and
+Unix/WebSocket RPC path. It does not sign a real phone into ChatGPT or validate
+OpenAI's enrollment service. A real device check is needed only when diagnosing
+that external flow or changing its protocol, not as a recurring release gate.
 
 Do not publish a release as part of validation. Submit the branch as a pull
 request and review its checks before merging or creating a release separately.
@@ -190,3 +236,34 @@ Configure `upstream` as `https://github.com/0xcaff/codex-web.git` if it does not
 exist. Exit status 1 identifies merge conflicts; a successful textual merge does
 not validate Desktop patches or runtime behavior. Run the validation steps above
 after resolving and preparing the upgrade branch.
+
+### Upstream upgrade candidate prepared on 2026-10-18
+
+This candidate merges upstream `2424e85` (2026-10-15), including Desktop
+`26.1007.30912`, the Nix-only CLI pin `0.162.0-alpha.17.2`, reconnect shim fixes
+and the Statsig bootstrap retry limit. The CLI-free Docker build still connects
+to an independently versioned app-server; no Compose settings or volumes change.
+
+The two source conflicts were resolved by retaining the fork's asset injection,
+locale context and server return value while taking the upstream package
+entrypoint, which initializes network policy before app startup. Both the
+build-revision patch and upstream bootstrap retry patch remain in prepare_asar.
+
+The Desktop tool integration now uses separate plugin and legacy override
+factories. Guard those factories only: replacing the entire transport override
+list would also discard the new authentication and workspace settings. The
+regression tests execute the patched factories and verify those other settings
+survive. The build-revision item has moved into the new profile Help submenu.
+
+The connection screen now also has a **Set up** state, and the English empty
+state says **Add device**. The pairing observer and browser fixture cover those
+states in English and German. The actual Desktop test also covers the new
+app-shell root, whose inline `100svh` height replaces the earlier viewport
+class on this route. The fork overrides both wrappers with the visual viewport
+height; the CI test verifies that the actual composer follows it.
+
+The experimental schema generated by CLI `0.162.0-alpha.17.2` retains the proxy's
+thread-resume configuration fields and the remote-control enable/pairing
+requests. The offline real-CLI integration workflow supplements this schema
+check with persisted conversations and process restart recovery on both tested
+versions. Compatibility with other CLI versions is outside that test matrix.

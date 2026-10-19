@@ -1,16 +1,19 @@
---- a/.vite/build/main-C5K7o1Hr.js
-+++ b/.vite/build/main-C5K7o1Hr.js
-@@ -135988,7 +135988,12 @@
-     repoRoot: e.repoRoot,
-     resourcesPath: e.resourcesPath,
-     defaultOriginator: e.defaultOriginator,
--    getConfigOverrides: () => tk(e),
-+    // codex_app is a Desktop-only MCP integration. In this web wrapper the
-+    // apparent local CLI is a relay to an external app-server; passing this
-+    // integration through creates a configuration unsupported by some CLI
-+    // versions and prevents every chat from starting.
-+    getConfigOverrides: () =>
-+      process.env.CODEX_WEB_DISABLE_INTERNAL_APP_MCP === `1` ? [] : tk(e),
-   });
+--- a/.vite/build/main-CqEoQDOU.js
++++ b/.vite/build/main-CqEoQDOU.js
+@@ -9538,6 +9538,8 @@
+   }),
+   Jc = f.r(`codex-app-tools-mcp`);
+ async function Yc(e) {
++  // The local CLI is a relay; the external app-server cannot host Desktop tools.
++  if (process.env.CODEX_WEB_DISABLE_INTERNAL_APP_MCP === `1`) return [];
+   return e.hostConfig.kind === `local`
+     ? [
+         `plugins.codex-app-tools@openai-bundled.mcp_servers.codex_app.enabled=${(await $c({ useWsl: c.yt(e.hostConfig), resourcesPath: e.resourcesPath })) != null}`,
+@@ -9545,6 +9547,7 @@
+     : [];
  }
- function F5(e) {
+ async function Xc(e) {
++  if (process.env.CODEX_WEB_DISABLE_INTERNAL_APP_MCP === `1`) return {};
+   if (
+     e.hostConfig.kind !== `local` ||
+     r.Ti(e.appServerVersion, `pluginMcpConfigOverrides`)
