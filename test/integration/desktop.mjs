@@ -104,11 +104,26 @@ test(
       isMobile: true,
       locale: "en-US",
     });
-    await context.route("**/*", (route) =>
-      new URL(route.request().url()).hostname === "127.0.0.1"
-        ? route.continue()
-        : route.abort(),
-    );
+    await context.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.hostname !== "127.0.0.1") return route.abort();
+      // Expose the actual startup decision inputs without overriding any gate.
+      // A blank splash must explain what it is waiting for in CI diagnostics.
+      if (/\/app-initial-[^/]+\.js$/.test(url.pathname)) {
+        const response = await route.fetch();
+        const source = await response.text();
+        const marker = "}) {\n  return i || r\n    ? `login`";
+        assert.ok(source.includes(marker), "locate Desktop startup decision");
+        return route.fulfill({
+          response,
+          body: source.replace(
+            marker,
+            "}) {\n  window.__CODEX_CI_STARTUP__ = arguments[0];\n  return i || r\n    ? `login`",
+          ),
+        });
+      }
+      return route.continue();
+    });
     const page = await context.newPage();
     page.setDefaultTimeout(10000);
     const errors = [];
@@ -274,7 +289,7 @@ test(
         await page.content(),
       );
       throw new Error(
-        `${e.message}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+        `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
         { cause: e },
       );
     }
