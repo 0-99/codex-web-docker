@@ -197,7 +197,10 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         await composer.fill(
           "Continue the saved conversation in the real browser.",
         );
-        await composer.press("Enter");
+        // Filling contenteditable does not wait for React's draft state. Use
+        // the real mobile Send action, which Playwright waits to be enabled,
+        // rather than racing Enter against that state update.
+        await page.getByRole("button", { name: "Send", exact: true }).click();
         await page
           .getByText("CI assistant response 2", { exact: true })
           .first()
