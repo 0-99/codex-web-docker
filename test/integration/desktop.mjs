@@ -128,6 +128,16 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
       });
       const page = await context.newPage();
       page.setDefaultTimeout(10000);
+      // Model promotions can appear after the saved chat is already visible.
+      // Dismiss the real first-run overlay whenever it blocks an action, while
+      // retaining the fixture's model instead of accepting the advertised one.
+      await page.addLocatorHandler(
+        page.getByRole("button", {
+          name: "Continue with current model",
+          exact: true,
+        }),
+        async (button) => button.click(),
+      );
       const errors = [];
       const diagnostics = [];
       page.on("pageerror", (e) => errors.push(e.message));
@@ -197,9 +207,8 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         await composer.fill(
           "Continue the saved conversation in the real browser.",
         );
-        // Filling contenteditable does not wait for React's draft state. Use
-        // the real mobile Send action, which Playwright waits to be enabled,
-        // rather than racing Enter against that state update.
+        // Use the real mobile Send action. Its actionability check also lets
+        // the handler above dismiss a late model promotion before submitting.
         await page.getByRole("button", { name: "Send", exact: true }).click();
         await page
           .getByText("CI assistant response 2", { exact: true })
