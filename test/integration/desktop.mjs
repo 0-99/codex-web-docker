@@ -136,7 +136,10 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
           name: "Continue with current model",
           exact: true,
         }),
-        async (button) => button.click(),
+        async (button) => {
+          await button.click();
+          console.log(`Cold start ${startupRun}: dismissed real model promotion`);
+        },
       );
       const errors = [];
       const diagnostics = [];
