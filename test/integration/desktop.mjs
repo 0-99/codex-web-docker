@@ -22,7 +22,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
       const appServer = await appServerFixture(t);
       const gateway = await pairingGateway(t, appServer);
       const seedSocket = await appServer.connect();
-      t.after(() => seedSocket.terminate());
+      appServer.cleanup(() => seedSocket.terminate());
       const seed = rpcSocket(seedSocket);
       await seed.call("initialize", {
         clientInfo: { name: "codex-web-ci-seed", version: "1" },
@@ -81,7 +81,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
           CODEX_APP_SERVER_RETRY_DELAYS_MS: "100",
         },
       );
-      t.after(() => backend.stop());
+      appServer.cleanup(() => backend.stop());
       const base = `http://127.0.0.1:${port}/ci/nested/`;
       await until(async () => {
         if (backend.child.exitCode !== null) throw new Error(backend.log());
@@ -102,7 +102,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
             }
           : {}),
       });
-      t.after(() => browser.close());
+      appServer.cleanup(() => browser.close());
       const context = await browser.newContext({
         viewport: { width: 393, height: 740 },
         isMobile: true,

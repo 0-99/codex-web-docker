@@ -21,6 +21,25 @@ export async function until(fn, label, timeout = 15000) {
   throw new Error(`Timed out: ${label}`);
 }
 
+// Dispose dependent resources before their owners, and run every disposer even
+// when an earlier one fails. Node test after-hooks run in registration order.
+export function fixtureCleanup(t) {
+  const disposers = [];
+  t.after(async () => {
+    const errors = [];
+    for (const dispose of disposers.reverse()) {
+      try {
+        await dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(errors, "Integration fixture cleanup failed");
+  });
+  return (dispose) => disposers.push(dispose);
+}
+
 export function childProcess(command, args, env = {}) {
   const child = spawn(command, args, {
     env: { ...process.env, ...env },
@@ -141,7 +160,8 @@ export async function pairingGateway(t, appServer) {
     remote.on("close", () => client.close());
     remote.on("error", () => client.close());
   });
-  t.after(async () => {
+  const cleanup = appServer.cleanup ?? fixtureCleanup(t);
+  cleanup(async () => {
     for (const socket of connections) socket.terminate();
     await new Promise((r) => ws.close(r));
     await new Promise((r) => server.close(r));
@@ -263,6 +283,8 @@ export async function appServerFixture(t) {
   assert.ok(binary, "Set CODEX_TEST_CLI_PATH to a real Codex CLI binary");
   await fs.mkdir("scratch", { recursive: true });
   const directory = await fs.mkdtemp(path.resolve("scratch/ci-"));
+  const cleanup = fixtureCleanup(t);
+  cleanup(() => fs.rm(directory, { recursive: true, force: true }));
   const codexHome = path.join(directory, "codex");
   const workspace = path.join(directory, "workspace");
   await fs.mkdir(codexHome);
@@ -295,6 +317,7 @@ export async function appServerFixture(t) {
     schema.definitions.RemoteControlPairingStartParams.properties.manualCode,
   );
   const model = await modelServer();
+  cleanup(() => model.close());
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
     JSON.stringify({ OPENAI_API_KEY: "ci-local-test-key" }),
@@ -361,13 +384,10 @@ export async function appServerFixture(t) {
       }
     }, "real app-server listener");
   }
-  t.after(async () => {
-    await serverProcess?.stop();
-    await model.close();
-    await fs.rm(directory, { recursive: true, force: true });
-  });
+  cleanup(() => serverProcess?.stop());
   await start();
   return {
+    cleanup,
     directory,
     workspace,
     codexHome,

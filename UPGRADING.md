@@ -284,6 +284,11 @@ real Desktop integration completes onboarding during five fresh starts per CLI.
 Both the CLI and web backend receive the same test-only `CODEX_HOME`; a fresh
 Electron user-data directory alone does not isolate `.codex-global-state.json`.
 The test checks that onboarding has not been completed at each cold start.
+Resources share a reverse-order cleanup stack: stop the browser, backend and
+app-server before deleting the shared Codex home. Every disposer must run even
+if another fails, so an `ENOTEMPTY` cleanup race cannot leave processes alive
+until the workflow timeout. `test/integration-cleanup.test.mjs` guards the order
+and error handling.
 
 Desktop integration failures retain separate RPC, screenshot and HTML files for
 each cold start. Startup, onboarding and logo-animation inputs are observed by
