@@ -5,6 +5,7 @@ import path from "node:path";
 import net from "node:net";
 import { once } from "node:events";
 import { chromium } from "playwright";
+import { format } from "prettier";
 import {
   appServerFixture,
   childProcess,
@@ -126,17 +127,28 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         }
         if (/\/onboarding-page-[^/]+\.js$/.test(url.pathname)) {
           const response = await route.fetch();
-          const source = await response.text();
+          const source = await format(await response.text(), {
+            parser: "babel",
+          });
           const marker =
             /isLoading:\s*g\s*\|\|\s*\(l\s*&&\s*d\)\s*\|\|\s*t\s*\|\|\s*p\s*\|\|\s*\(n\s*!==\s*`welcome`\s*&&\s*!r\s*&&\s*e\s*==\s*null\)/;
           assert.ok(marker.test(source), "locate Desktop onboarding readiness");
           return route.fulfill({
             response,
-            body: source.replace(
-              marker,
-              (match) =>
-                `isLoading: (window.__CODEX_CI_ONBOARDING__ = { previous: e, advancing: t, override: n, welcomePending: r, chatgpt: l, contextLoading: d, statsigLoading: p, teenLoading: g }, ${match.slice(match.indexOf(":") + 1)})`,
-            ),
+            body: source
+              .replace(
+                marker,
+                (match) =>
+                  `isLoading: (window.__CODEX_CI_ONBOARDING__ = { previous: e, advancing: t, override: n, welcomePending: r, chatgpt: l, contextLoading: d, statsigLoading: p, teenLoading: g }, ${match.slice(match.indexOf(":") + 1)})`,
+              )
+              .replace(
+                "  switch (n) {\n    case Z.Start:",
+                "  window.__CODEX_CI_ONBOARDING_STEP__ = n;\n  switch (n) {\n    case Z.Start:",
+              )
+              .replace(
+                "  let w = r && f ? o : void 0,",
+                "  window.__CODEX_CI_SPLASH__ = { showSplash: r, focused: u, waitForFocus: c, animate: f };\n  let w = r && f ? o : void 0,",
+              ),
           });
         }
         return route.continue();
@@ -330,7 +342,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         });
         await fs.writeFile(`${artifact}.html`, await page.content());
         throw new Error(
-          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nOnboarding: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_ONBOARDING__))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nOnboarding: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_ONBOARDING__))}\nStep: ${JSON.stringify(await page.evaluate(() => ({ step: window.__CODEX_CI_ONBOARDING_STEP__, splash: window.__CODEX_CI_SPLASH__ })))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
           { cause: e },
         );
       }
