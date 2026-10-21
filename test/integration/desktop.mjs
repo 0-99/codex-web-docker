@@ -5,6 +5,7 @@ import path from "node:path";
 import net from "node:net";
 import { once } from "node:events";
 import { chromium } from "playwright";
+import { format } from "prettier";
 import {
   appServerFixture,
   childProcess,
@@ -13,6 +14,8 @@ import {
   rpcSocket,
 } from "./support.mjs";
 
+// Each iteration owns a fresh CLI home, backend profile and browser. Reusing
+// completed onboarding would hide intermittent stalls in the first-run splash.
 for (let startupRun = 1; startupRun <= 5; startupRun++)
   test(
     `real Desktop resumes saved chats, sends turns, survives reconnect and offers mobile pairing (cold start ${startupRun})`,
@@ -21,7 +24,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
       const appServer = await appServerFixture(t);
       const gateway = await pairingGateway(t, appServer);
       const seedSocket = await appServer.connect();
-      t.after(() => seedSocket.terminate());
+      appServer.cleanup(() => seedSocket.terminate());
       const seed = rpcSocket(seedSocket);
       await seed.call("initialize", {
         clientInfo: { name: "codex-web-ci-seed", version: "1" },
@@ -73,13 +76,17 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         {
           CODEX_APP_SERVER_URL: gateway.endpoint,
           CODEX_CLI_PATH: proxy,
+          // Onboarding lives in CODEX_HOME/.codex-global-state.json; resetting
+          // only Electron user data leaves it completed on later cold starts.
+          // Isolate both stores while sharing this run's saved chat with the CLI.
+          CODEX_HOME: appServer.codexHome,
           CODEX_WEB_USER_DATA_DIR: path.join(appServer.directory, "web"),
           CODEX_WEB_BASE_PATH: "/ci/nested/",
           CODEX_WEB_DISABLE_INTERNAL_APP_MCP: "1",
           CODEX_APP_SERVER_RETRY_DELAYS_MS: "100",
         },
       );
-      t.after(() => backend.stop());
+      appServer.cleanup(() => backend.stop());
       const base = `http://127.0.0.1:${port}/ci/nested/`;
       await until(async () => {
         if (backend.child.exitCode !== null) throw new Error(backend.log());
@@ -100,7 +107,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
             }
           : {}),
       });
-      t.after(() => browser.close());
+      appServer.cleanup(() => browser.close());
       const context = await browser.newContext({
         viewport: { width: 393, height: 740 },
         isMobile: true,
@@ -124,6 +131,39 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
             ),
           });
         }
+        if (/\/onboarding-page-[^/]+\.js$/.test(url.pathname)) {
+          const response = await route.fetch();
+          // These probes target symbols in the pinned upstream Desktop bundle.
+          // Formatting gives the string markers predictable whitespace; symbol
+          // names still need review on upgrades (see UPGRADING.md).
+          const source = await format(await response.text(), {
+            parser: "babel",
+          });
+          const marker =
+            /isLoading:\s*g\s*\|\|\s*\(l\s*&&\s*d\)\s*\|\|\s*t\s*\|\|\s*p\s*\|\|\s*\(n\s*!==\s*`welcome`\s*&&\s*!r\s*&&\s*e\s*==\s*null\)/;
+          assert.ok(marker.test(source), "locate Desktop onboarding readiness");
+          return route.fulfill({
+            response,
+            body: source
+              // Record inputs, then return the original isLoading expression
+              // via the comma operator. Do not force any readiness/auth gate.
+              .replace(
+                marker,
+                (match) =>
+                  `isLoading: (window.__CODEX_CI_ONBOARDING__ = { previous: e, advancing: t, override: n, welcomePending: r, chatgpt: l, contextLoading: d, statsigLoading: p, teenLoading: g }, ${match.slice(match.indexOf(":") + 1)})`,
+              )
+              // Observe the chosen wizard step and the splash's focus wait
+              // separately so a stuck page shows which transition is blocked.
+              .replace(
+                "  switch (n) {\n    case Z.Start:",
+                "  window.__CODEX_CI_ONBOARDING_STEP__ = n;\n  switch (n) {\n    case Z.Start:",
+              )
+              .replace(
+                "  let w = r && f ? o : void 0,",
+                "  window.__CODEX_CI_SPLASH__ = { showSplash: r, focused: u, waitForFocus: c, animate: f };\n  let w = r && f ? o : void 0,",
+              ),
+          });
+        }
         return route.continue();
       });
       const page = await context.newPage();
@@ -138,7 +178,9 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         }),
         async (button) => {
           await button.click();
-          console.log(`Cold start ${startupRun}: dismissed real model promotion`);
+          console.log(
+            `Cold start ${startupRun}: dismissed real model promotion`,
+          );
         },
       );
       const errors = [];
@@ -168,6 +210,22 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
               .isVisible()),
           "Desktop first-run screen or saved chat",
           45000,
+        );
+        const readiness = await page.evaluate(() => ({
+          startup: window.__CODEX_CI_STARTUP__,
+          onboarding: window.__CODEX_CI_ONBOARDING__,
+          step: window.__CODEX_CI_ONBOARDING_STEP__,
+          splash: window.__CODEX_CI_SPLASH__,
+        }));
+        console.log(
+          `Cold start ${startupRun} readiness: ${JSON.stringify(readiness)}`,
+        );
+        // Assert isolation without modifying the flag: all five runs must
+        // exercise first-run behavior, rather than inherit a completed profile.
+        assert.equal(
+          readiness.startup.projectlessOnboardingCompleted,
+          false,
+          "each cold start uses fresh Desktop onboarding state",
         );
         if (
           await page
@@ -299,16 +357,20 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         );
         assert.deepEqual(errors, []);
       } catch (e) {
+        // Keep evidence from different runs separate. Write RPC first so it
+        // survives even if the broken page cannot produce a screenshot.
+        const artifact = `scratch/integration-results/desktop-cold-start-${startupRun}`;
         await fs.mkdir("scratch/integration-results", { recursive: true });
-        await page.screenshot({
-          path: "scratch/integration-results/desktop-failure.png",
-        });
         await fs.writeFile(
-          "scratch/integration-results/desktop-failure.html",
-          await page.content(),
+          `${artifact}-rpc.json`,
+          JSON.stringify(gateway.traffic, null, 2),
         );
+        await page.screenshot({
+          path: `${artifact}.png`,
+        });
+        await fs.writeFile(`${artifact}.html`, await page.content());
         throw new Error(
-          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nOnboarding: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_ONBOARDING__))}\nStep: ${JSON.stringify(await page.evaluate(() => ({ step: window.__CODEX_CI_ONBOARDING_STEP__, splash: window.__CODEX_CI_SPLASH__ })))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
           { cause: e },
         );
       }

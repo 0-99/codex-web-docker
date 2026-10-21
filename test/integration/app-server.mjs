@@ -22,7 +22,9 @@ test(
         CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "3000",
       },
     );
-    t.after(() => proxy.stop());
+    // The relay depends on the server and its home; stop it on the same stack
+    // before those owners are torn down, including when the test fails.
+    server.cleanup(() => proxy.stop());
     const rpc = rpcStream(proxy.child);
     try {
       await rpc.call("initialize", {

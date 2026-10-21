@@ -13,6 +13,11 @@ import {
   openSelectWorkspaceRootDialog,
   type WorkspaceDirectoryEntries,
 } from "./workspace-root-dialog";
+import {
+  browserWindowFocus,
+  installBrowserWindowFocus,
+  withBrowserWindowFocus,
+} from "./window-focus";
 
 type IpcListener = (event: unknown, ...args: unknown[]) => void;
 
@@ -184,7 +189,14 @@ export function emitRendererEvent(channel: string, args: unknown[]): void {
 
 function handleIncomingMessage(message: MainToRendererMessage): void {
   if (message.type === "ipc-main-event") {
-    emitRendererEvent(message.channel, message.args);
+    // Only Desktop view messages carry this focus protocol. Translate at delivery
+    // time using the receiving tab, rather than the backend's hidden window.
+    emitRendererEvent(
+      message.channel,
+      message.channel === "codex_desktop:message-for-view"
+        ? message.args.map((value) => withBrowserWindowFocus(value, document))
+        : message.args,
+    );
     return;
   }
 
@@ -494,6 +506,18 @@ electronShim.onMemoryNavigationChanged = (navigation) => {
 export const ipcRenderer = {
   invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     if (channel === "codex_desktop:message-from-view" && args.length === 1) {
+      if (
+        isRecord(args[0]) &&
+        args[0].type === "electron-window-focus-request"
+      ) {
+        // Startup may subscribe after the browser's initial focus event. Answer
+        // its explicit query locally through the same channel as later updates;
+        // the hidden backend window cannot supply this tab's actual focus.
+        emitRendererEvent("codex_desktop:message-for-view", [
+          browserWindowFocus(document),
+        ]);
+        return Promise.resolve(undefined);
+      }
       if (isOpenInBrowserMessage(args[0])) {
         window.open(args[0].url, "_blank", "noopener,noreferrer");
       }
@@ -638,6 +662,12 @@ export const ipcRenderer = {
     return unimplemented("ipcRenderer.sendSync");
   },
 };
+
+// Each tab owns these listeners for its lifetime. Keep Desktop informed after
+// the initial query without sharing focus state between clients of the backend.
+installBrowserWindowFocus(window, document, (message) => {
+  emitRendererEvent("codex_desktop:message-for-view", [message]);
+});
 
 ensureSocket();
 

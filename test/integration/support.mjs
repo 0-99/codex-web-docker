@@ -21,6 +21,32 @@ export async function until(fn, label, timeout = 15000) {
   throw new Error(`Timed out: ${label}`);
 }
 
+/**
+ * Register cleanup after acquiring each resource, sharing this stack with all
+ * dependent fixtures. Reverse acquisition order stops clients before servers
+ * and file writers before deleting their shared home.
+ *
+ * Separate Node test after-hooks run in registration order: deleting the home
+ * first caused ENOTEMPTY races and left processes alive until the CI timeout.
+ * Collect errors so a failed disposer cannot prevent the remaining shutdown.
+ */
+export function fixtureCleanup(t) {
+  const disposers = [];
+  t.after(async () => {
+    const errors = [];
+    for (const dispose of disposers.reverse()) {
+      try {
+        await dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length)
+      throw new AggregateError(errors, "Integration fixture cleanup failed");
+  });
+  return (dispose) => disposers.push(dispose);
+}
+
 export function childProcess(command, args, env = {}) {
   const child = spawn(command, args, {
     env: { ...process.env, ...env },
@@ -101,6 +127,9 @@ export async function pairingGateway(t, appServer) {
   const ws = new WebSocketServer({ server });
   const connections = new Set();
   const requests = [];
+  // Keep both directions for startup failure diagnostics. Traffic comes from
+  // the isolated fixture with dummy credentials and a local model server.
+  const traffic = [];
   ws.on("connection", (client) => {
     const remote = appServer.openSocket();
     connections.add(client);
@@ -112,6 +141,7 @@ export async function pairingGateway(t, appServer) {
     client.on("message", (raw) => {
       const data = String(raw);
       const message = JSON.parse(data);
+      traffic.push({ direction: "request", message });
       if (
         message.method === "remoteControl/enable" ||
         message.method === "remoteControl/pairing/start"
@@ -129,13 +159,20 @@ export async function pairingGateway(t, appServer) {
       else queued.push(data);
     });
     remote.on("message", (data) => {
+      traffic.push({
+        direction: "response",
+        message: JSON.parse(String(data)),
+      });
       if (client.readyState === WebSocket.OPEN) client.send(String(data));
     });
     client.on("close", () => remote.terminate());
     remote.on("close", () => client.close());
     remote.on("error", () => client.close());
   });
-  t.after(async () => {
+  // Join the upstream fixture's stack so this gateway stops before its server.
+  // Standalone gateway tests can instead supply a mock without a cleanup stack.
+  const cleanup = appServer.cleanup ?? fixtureCleanup(t);
+  cleanup(async () => {
     for (const socket of connections) socket.terminate();
     await new Promise((r) => ws.close(r));
     await new Promise((r) => server.close(r));
@@ -143,7 +180,7 @@ export async function pairingGateway(t, appServer) {
   });
   server.listen(socketPath);
   await once(server, "listening");
-  return { endpoint: `unix://${socketPath}`, requests };
+  return { endpoint: `unix://${socketPath}`, requests, traffic };
 }
 
 async function modelServer() {
@@ -257,6 +294,10 @@ export async function appServerFixture(t) {
   assert.ok(binary, "Set CODEX_TEST_CLI_PATH to a real Codex CLI binary");
   await fs.mkdir("scratch", { recursive: true });
   const directory = await fs.mkdtemp(path.resolve("scratch/ci-"));
+  const cleanup = fixtureCleanup(t);
+  // Register the directory first so it is removed last. Callers must add their
+  // backend/browser resources to this same stack to stop writers before removal.
+  cleanup(() => fs.rm(directory, { recursive: true, force: true }));
   const codexHome = path.join(directory, "codex");
   const workspace = path.join(directory, "workspace");
   await fs.mkdir(codexHome);
@@ -289,6 +330,7 @@ export async function appServerFixture(t) {
     schema.definitions.RemoteControlPairingStartParams.properties.manualCode,
   );
   const model = await modelServer();
+  cleanup(() => model.close());
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
     JSON.stringify({ OPENAI_API_KEY: "ci-local-test-key" }),
@@ -355,13 +397,12 @@ export async function appServerFixture(t) {
       }
     }, "real app-server listener");
   }
-  t.after(async () => {
-    await serverProcess?.stop();
-    await model.close();
-    await fs.rm(directory, { recursive: true, force: true });
-  });
+  // Resolve the current process at shutdown: reconnect tests replace it through
+  // stop()/start(), so capturing the initial process would leak its replacement.
+  cleanup(() => serverProcess?.stop());
   await start();
   return {
+    cleanup,
     directory,
     workspace,
     codexHome,
