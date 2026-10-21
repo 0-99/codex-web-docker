@@ -34,8 +34,8 @@ listener. Compatible WebSocket endpoints and authenticating relays remain usable
 
 Keep the app-server endpoint private. When using a Unix socket, the frontend and
 app-server must use matching numeric UIDs so the frontend can connect to the
-CLI's owner-only socket. The example initializes the dedicated socket volume
-for UID 1000; account state remains in a separate app-server home volume.
+CLI's owner-only socket. The example initializes both dedicated socket volumes
+with mode 0700 for UID 1000; account state remains in a separate app-server home volume.
 
 For a Unix socket, mount the same directory or named volume in both containers,
 start the server with an absolute socket path, and configure the web container:
@@ -45,7 +45,17 @@ environment:
   CODEX_APP_SERVER_URL: unix:///run/codex/app-server.sock
 volumes:
   - codex-app-server-socket:/run/codex
+  - codex-daemon-socket:/tmp/codex-daemon-1000
 ```
+
+CLI 0.163.0 creates the physical socket under `/tmp/codex-daemon-<UID>`
+and leaves an absolute symlink at the `--listen` path. Both containers must
+mount that protected directory at the same absolute path in addition to
+`/run/codex`. Sharing only the alias produces a dangling link. The alias parent
+must also prevent group/other writes: use mode 0700, replacing the older 0770.
+Custom numeric UIDs must also change the daemon mount path and volume owner.
+For existing deployments, follow the [CLI 0.163.0 migration](#upgrading-an-existing-stack-to-cli-01630)
+before changing the image tag.
 
 ### Mobile Connect pairing
 
@@ -257,11 +267,14 @@ The manifest link uses `crossorigin="use-credentials"`. This is harmless on an
 unprotected installation and lets a reverse proxy protected by Authelia or any
 other cookie-based authentication gateway authorize the manifest request.
 
-## Compose and Portainer
+## Docker Compose
 
 The [example](examples/docker-compose.yml) starts both `codex-cli` and
 `codex-web`, with Compose-managed networks and volumes. No existing network,
-volume, reverse proxy or MCP credentials are required:
+volume, reverse proxy or MCP credentials are required. If you already run the
+older stack, read the [migration steps](#upgrading-an-existing-stack-to-cli-01630)
+before deploying this example:
+
 
 ```sh
 docker compose -f examples/docker-compose.yml up -d
@@ -278,8 +291,8 @@ The socket healthcheck verifies listener presence, not account authorization.
 Both containers mount the same workspace at `/workspace` and
 `/home/node/Documents/Codex`, including projectless Desktop conversations.
 Account/configuration data and web state use separate persistent home volumes.
-The socket volume is a small tmpfs with UID/GID 1000 and mode 0770; it holds no
-persistent account data and needs no initialization container. Docker creates
+The two socket volumes are small tmpfs mounts with UID/GID 1000 and mode 0700; they hold no
+persistent account data and need no initialization container. Docker creates
 project-scoped resource names. Existing installation-specific volumes are not
 automatically reused: explicitly map their names in your deployment override
 if you want to retain existing data rather than start fresh.
@@ -307,6 +320,64 @@ reach the UI can operate the connected Codex instance with that instance's
 permissions. Keep the app-server private and place an authentication layer or
 VPN in front of the web UI before exposing it beyond a trusted network.
 
+### Choosing a supported CLI version
+
+Both **0.155.1 and 0.163.0** are supported during the transition. There is no
+requirement to upgrade an existing 0.155.1 installation or change its socket
+volumes while it stays on that version.
+
+The example defaults to 0.163.0. To select the older supported version, set
+this in the Compose project's `.env` file:
+
+```dotenv
+CODEX_CLI_VERSION=0.155.1
+```
+
+Use `CODEX_CLI_VERSION=0.163.0` for the newer version. The updated example's
+two socket volumes and mode 0700 work with both versions; 0.155.1 simply does
+not use the protected daemon directory. CI requires the real-container tests
+and the fresh-volume Compose probes to pass for both versions.
+
+Changing an existing 0.155.1 deployment to 0.163.0 also requires the socket
+migration below. Changing back to 0.155.1 can retain the updated volume layout.
+Support for the older version should only be removed in an explicit later change.
+
+### Upgrading an existing stack to CLI 0.163.0
+
+CLI 0.155.1 placed the socket directly at `/run/codex/app-server.sock`.
+CLI 0.163.0 leaves a symlink there and places the physical socket in
+`/tmp/codex-daemon-1000/`. Containers have separate `/tmp` directories;
+sharing only the old volume therefore exposes the link without its target.
+
+Update an existing Docker Compose deployment as follows:
+
+1. Set `CODEX_CLI_VERSION=0.163.0` in `.env` when using the example, or set
+   the CLI image to `ghcr.io/icoretech/codex-docker:0.163.0` in your own Compose file.
+2. Keep `codex_socket:/run/codex` in both services and add
+   `codex_daemon:/tmp/codex-daemon-1000` to **both** services.
+3. Add the top-level `codex_daemon` volume definition from the
+   [example Compose file](examples/docker-compose.yml). Both socket volumes
+   use tmpfs, UID/GID 1000 and mode `0700`; change the old `codex_socket`
+   option from `mode=0770` to `mode=0700`.
+4. Stop both services and remove their stopped containers so they release
+   the socket volume. Remove **only the old transient socket volume**
+   corresponding to `codex_socket`. Docker Compose normally prefixes its
+   actual name with the project name; confirm its mount was `/run/codex`.
+   Editing the YAML alone does not update options on an existing named volume.
+5. Redeploy/recreate both services. Docker creates the socket volumes with
+   the new options. Keep `CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock`
+   and the existing `app-server --listen` command.
+
+The socket volumes hold temporary connection files only. Preserve the existing
+account, web-state and workspace volumes and their deployment-specific names.
+**Do not use `docker compose down -v`**, which would remove other stack volumes
+as well. Changing the CLI tag alone is insufficient for this migration.
+
+These paths assume both containers run as UID 1000. For a custom numeric UID,
+adjust the daemon path in both mounts and the ownership of both socket volumes.
+The protected directory must be mounted at the same absolute path in both
+containers so the symlink resolves.
+
 ## Docker Hub publishing
 
 The GitHub Actions workflow publishes releases to `0to99/codex-web-docker` on
@@ -320,18 +391,21 @@ action's matching tags, including `latest` for a stable semantic version.
 
 ### App-server image compatibility checks
 
-The actual `0.155.1` image passed the full offline integration suite on
-2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
+Both companion images `0.163.0` and `0.155.1` are supported (`linux/amd64`).
+Each has a required real-container integration case; failures in either block
+release publication. The floating `latest` probe remains advisory.
+The previous `0.155.1` baseline passed on 2026-10-18:
+[validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
 This validates the covered local workflows. Shell-tool execution inside the
 CLI sandbox, live account enrollment and known failures outside these flows
 need separate regression cases; see the container sandbox configuration above.
 
 The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
-to `ghcr.io/icoretech/codex-docker:0.155.1` and uses a shared Unix socket, also
-required by the Mobile Connect fallback. See [setup](#compose-and-portainer).
+to `ghcr.io/icoretech/codex-docker:0.163.0` by default and uses a shared Unix socket, also
+required by the Mobile Connect fallback. See [setup](#docker-compose).
 
-`test/integration/images.json` pins the required companion-image test to
-`ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
+`test/integration/images.json` pins `supported` to version `0.163.0` and
+`supported-previous` to version `0.155.1`. CI runs both actual images through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
 pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
 checks the Compose CLI image pin, creates the configured tmpfs socket volume,

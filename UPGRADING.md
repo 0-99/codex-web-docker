@@ -117,7 +117,7 @@ For the external app-server integration, verify these invariants after a merge:
    the actual extracted Desktop in Playwright, rather than a modeled layout,
    and exercises persisted chats, mobile resizing, process restart recovery
    and the real connection screen's pairing action.
-6. Release publication also calls that workflow. Both binary CLI versions, the supported container image and all
+6. Release publication also calls that workflow. Both binary CLI versions, both supported container images and all
    Docker platform checks must pass before the image publishing job can run.
    Routine updates do not require repeating manual phone checks.
 
@@ -139,9 +139,10 @@ finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
 
 ### Offline integration CI
 
-The required container baseline is recorded in `test/integration/images.json`:
-`ghcr.io/icoretech/codex-docker:0.155.1`. The workflow executes the pulled image
-with its normal entrypoint and verifies `codex-cli 0.155.1`; it does not extract
+The required container versions are recorded in `test/integration/images.json`:
+`supported` pins `ghcr.io/icoretech/codex-docker:0.163.0`; `supported-previous`
+pins `ghcr.io/icoretech/codex-docker:0.155.1`. Both are required checks. The workflow
+executes each pulled image with its normal entrypoint and verifies its CLI version; it does not extract
 and substitute a host binary. The job summary records the immutable digest and
 reported CLI version. The image runs as the runner UID with a fresh test home
 and the repository mounted at the identical absolute path.
@@ -294,3 +295,22 @@ Desktop integration failures retain separate RPC, screenshot and HTML files for
 each cold start. Startup, onboarding and logo-animation inputs are observed by
 the test without changing their decisions. All diagnostics use isolated dummy
 accounts and a local model fixture.
+
+### Companion CLI 0.163.0
+
+The Compose image defaults to 0.163.0; `CODEX_CLI_VERSION=0.155.1` selects
+the other supported version. Both versions have required real-container tests
+and fresh-volume Compose probes. Keep 0.155.1 supported until an explicit later
+change removes it. Existing 0.155.1 deployments need not change their socket
+layout until they upgrade. This CLI publishes
+an absolute rendezvous symlink into `/tmp/codex-daemon-<UID>`. Share this physical
+socket directory as well as the alias directory between the CLI and frontend;
+use UID/GID 1000 and mode 0700 for both tmpfs volumes. Existing stacks must
+recreate the transient alias volume to replace its old 0770 options and add
+the new daemon volume. Preserve all account and workspace volumes. See the
+Unix-socket migration instructions in DOCKER.md.
+
+The container test shares the physical daemon directory with the host at the
+same path. The Compose probe checks that a separate container can resolve the
+symlink with only the declared mounts. Listener failures include the symlink
+target, connection error and app-server log.

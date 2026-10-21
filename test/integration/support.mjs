@@ -384,18 +384,31 @@ export async function appServerFixture(t) {
     serverProcess = childProcess(binary, ["app-server", "--listen", endpoint], {
       CODEX_HOME: codexHome,
     });
-    await until(async () => {
-      if (serverProcess.child.exitCode !== null)
-        throw new Error(serverProcess.log());
+    let connectionError;
+    try {
+      await until(async () => {
+        if (serverProcess.child.exitCode !== null)
+          throw new Error(serverProcess.log());
+        try {
+          const socket = openSocket();
+          await once(socket, "open");
+          socket.close();
+          return true;
+        } catch (error) {
+          connectionError = error;
+          return false;
+        }
+      }, "real app-server listener");
+    } catch (error) {
+      let target;
       try {
-        const socket = openSocket();
-        await once(socket, "open");
-        socket.close();
-        return true;
-      } catch {
-        return false;
-      }
-    }, "real app-server listener");
+        target = await fs.readlink(socketPath);
+      } catch {}
+      throw new Error(
+        `${error.message}\nSocket target: ${target || socketPath}\nConnection: ${connectionError?.message}\nApp-server: ${serverProcess.log()}`,
+        { cause: error },
+      );
+    }
   }
   // Resolve the current process at shutdown: reconnect tests replace it through
   // stop()/start(), so capturing the initial process would leak its replacement.
