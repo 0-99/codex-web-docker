@@ -131,6 +131,48 @@ test("bridges JSONL stdio to a WebSocket app-server", async (t) => {
   await assertBridge(t, `ws://127.0.0.1:${address.port}`);
 });
 
+test("preserves initialize capabilities and account/policy RPCs byte for byte", async (t) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  echoConnections(server);
+  const seen = [];
+  server.on("connection", (socket) =>
+    socket.on("message", (data) => seen.push(String(data))),
+  );
+  await once(server, "listening");
+  const child = spawnProxy(t, `ws://127.0.0.1:${server.address().port}`);
+  const output = readline.createInterface({ input: child.stdout });
+  // Capability negotiation cannot repair a response field absent from this
+  // CLI's protocol. Ensure the relay neither drops capabilities nor invents it.
+  const messages = [
+    {
+      id: "init",
+      method: "initialize",
+      params: {
+        clientInfo: { name: "codex_web_ci", version: "1" },
+        capabilities: {
+          experimentalApi: true,
+          explicitGatewayOauth: true,
+          extensions: { example: {} },
+        },
+      },
+    },
+    { id: "account", method: "account/read", params: { refreshToken: false } },
+    { id: "policy", method: "configRequirements/read", params: {} },
+  ].map((message) => JSON.stringify(message));
+  for (const message of messages) {
+    const response = once(output, "line");
+    child.stdin.write(message + "\n");
+    await response;
+  }
+  assert.deepEqual(
+    seen.filter((raw) => JSON.parse(raw).id),
+    messages,
+  );
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
+});
+
 test("does not pass the Desktop-only codex_app override to an external app-server", async (t) => {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   t.after(() => new Promise((resolve) => server.close(resolve)));

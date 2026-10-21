@@ -279,7 +279,7 @@ async function modelServer() {
   };
 }
 
-export async function appServerFixture(t) {
+export async function appServerFixture(t, { chatgptAuth } = {}) {
   assert.equal(
     process.env.CODEX_TEST_NETWORK_ISOLATED,
     "1",
@@ -333,7 +333,9 @@ export async function appServerFixture(t) {
   cleanup(() => model.close());
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
-    JSON.stringify({ OPENAI_API_KEY: "ci-local-test-key" }),
+    // Routing tests need the real CLI's ChatGPT response shape. Synthetic JWTs
+    // are accepted only inside this loopback-only fixture, never from a user home.
+    JSON.stringify(chatgptAuth ?? { OPENAI_API_KEY: "ci-local-test-key" }),
   );
   await fs.writeFile(
     path.join(codexHome, "config.toml"),
@@ -356,7 +358,7 @@ export async function appServerFixture(t) {
       'name = "Local CI responses"',
       `base_url = ${JSON.stringify(model.url)}`,
       'wire_api = "responses"',
-      "requires_openai_auth = false",
+      `requires_openai_auth = ${Boolean(chatgptAuth)}`,
     ].join("\n"),
   );
   const reservation = net.createServer();

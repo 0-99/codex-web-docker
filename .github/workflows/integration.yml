@@ -54,7 +54,7 @@ jobs:
             exec runuser -u "$1" -- env "PATH=$2" "CODEX_TEST_CLI_PATH=$3" \
               CODEX_TEST_NETWORK_ISOLATED=1 CODEX_TEST_PAIRING=1 \
               "$4" --test --test-concurrency=1 \
-              test/integration/app-server.mjs test/integration/desktop.mjs
+              test/integration/app-server.mjs test/integration/desktop.mjs test/integration/workspace-routing.mjs
           ' integration "$integration_user" "$PATH" "$CODEX_TEST_CLI_PATH" "$integration_node"
       - name: Test actual image in its network namespace
         if: matrix.cli == 'supported' || (matrix.cli == 'candidate' && steps.prepare_container.outcome == 'success')
@@ -72,7 +72,7 @@ jobs:
               "CODEX_TEST_CLI_SECURITY_OPTS=$CODEX_TEST_CLI_SECURITY_OPTS" \
               CODEX_TEST_NETWORK_ISOLATED=1 CODEX_TEST_PAIRING=1 \
               "$(command -v node)" --test --test-concurrency=1 \
-              test/integration/app-server.mjs test/integration/desktop.mjs
+              test/integration/app-server.mjs test/integration/desktop.mjs test/integration/workspace-routing.mjs
       - name: Record candidate result
         if: always() && matrix.cli == 'candidate'
         env:

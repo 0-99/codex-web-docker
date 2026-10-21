@@ -1,0 +1,101 @@
+--- a/.vite/build/src-BJv5Mk7n.js
++++ b/.vite/build/src-BJv5Mk7n.js
+@@ -54396,6 +54396,14 @@
+         throw Error(
+           `Workspace routing does not match the authenticated account`,
+         );
++      // A cached compatibility proof belongs to one account AND user. Unlike
++      // native workspace routing, the legacy discriminator has no built-in ID.
++      if (r.kind === `legacy` && r.codexWebVerified != null) {
++        let principal = qn(n);
++        if (principal?.accountId !== r.codexWebVerified.accountId ||
++            principal?.userId !== r.codexWebVerified.userId)
++          throw Error(`Workspace routing does not match the authenticated account`);
++      }
+       return { token: n, routing: r, signal: t };
+     }
+     invalidate() {
+@@ -54460,6 +54468,24 @@
+         Kn(e)?.isFedramp !== !0
+       )
+         return { kind: `legacy` };
++      // Stable CLI 0.155.1 omits workspaceRouting despite the newer version
++      // number. Do not widen the upstream range: verify only this exact case,
++      // keeping null, supplied routes and every managed-policy guard intact.
++      if (
++        !Object.hasOwn(t, `workspaceRouting`) &&
++        c === `0.155.1` &&
++        s?.chatgptBaseUrl == null &&
++        s?.enforceResidency == null &&
++        s?.application?.network == null &&
++        Kn(e)?.isFedramp !== !0 &&
++        this.client.options.verifyLegacyWorkspaceRouting != null
++      ) {
++        let verified = await this.client.options.verifyLegacyWorkspaceRouting({
++          token: e,
++          signal: this.controller.signal,
++        });
++        return { kind: `legacy`, codexWebVerified: verified };
++      }
+       throw Error(
+         `Workspace routing is unavailable for this account and app-server version`,
+       );
+--- a/.vite/build/main-CqEoQDOU.js
++++ b/.vite/build/main-CqEoQDOU.js
+@@ -159252,6 +159252,38 @@
+             e === `local` && t.id === `local` && d.kind === `stdio`,
+         }),
+         m = new i.pn(this.options.messageChannel, {
++          // Use Desktop's configured bootstrap URL and network-policy transport.
++          // The verifier permits only a same-origin, unconstrained legacy route;
++          // it neither substitutes a backend nor changes the app-server reply.
++          verifyLegacyWorkspaceRouting: ({ token, signal }) => {
++            if (e !== l.h || d.kind !== `stdio`)
++              throw Error(
++                `Legacy routing compatibility requires the local relay`,
++              );
++            let headers = {};
++            g.it(headers, token, s);
++            return globalThis.__codexWebVerifyLegacyWorkspaceRoute({
++              token,
++              signal,
++              headers,
++              accountUrl: g.dt(s, `/wham/accounts/check`),
++              fetch: (url, init) =>
++                this.options.applicationNetwork.fetch(url, init),
++              readState: async () => {
++                let [account, requirements, token] = await Promise.all([
++                  m.sendAppServerExtensionRequest(`account/read`, {
++                    refreshToken: !1,
++                  }),
++                  m.sendAppServerExtensionRequest(
++                    `configRequirements/read`,
++                    {},
++                  ),
++                  m.getAuthToken({ refreshToken: !1 }),
++                ]);
++                return { account, requirements, token };
++              },
++            });
++          },
+           buildFlavor: this.options.buildFlavor,
+           clientInfo: { name: g.ht, title: `Codex Desktop`, version: f },
+           defaultServiceName: g.mt,
+--- a/.vite/build/bootstrap-CooIJpZm.js
++++ b/.vite/build/bootstrap-CooIJpZm.js
+@@ -666,7 +666,14 @@
+   n.signal.throwIfAborted();
+   for (let e of Object.keys(t))
+     e.toLowerCase() === `x-openai-account-routing-override` && delete t[e];
+-  if (n.routing.kind === `legacy`) return e;
++  if (n.routing.kind === `legacy`) {
++    // The 0.155.1 exception proves only the configured origin. Do not reuse
++    // that proof for a different OpenAI service or a changed bootstrap URL.
++    if (n.routing.codexWebVerified != null &&
++        new URL(e).origin !== n.routing.codexWebVerified.origin)
++      throw Error(`Legacy workspace routing destination changed`);
++    return e;
++  }
+   let { workspace: r } = n.routing;
+   r.accountRoutingOverride !== `NO_CONSTRAINT` &&
+     (t[`X-OpenAI-Account-Routing-Override`] = r.accountRoutingOverride);

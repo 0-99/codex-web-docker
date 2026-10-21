@@ -123,3 +123,11 @@ Upstream reconnect handling restores the browser-to-backend IPC connection by
 creating a new renderer and reloading the tab. The Docker proxy separately
 restores its connection to the external app-server, which is hidden behind a
 still-open stdio transport. Its thread-resume barrier remains necessary.
+
+### Stable CLI workspace-routing compatibility
+
+The exact CLI `0.155.1` exception and its authenticated routing proof are
+documented in [workspace-routing-0.155.1.md](docs/workspace-routing-0.155.1.md).
+The implementation lives in `src/server/workspace-routing.ts`; a small Desktop
+patch provides the configured URL, network-policy transport and discovery hook.
+It never changes an app-server account response or relaxes native routing policy.
