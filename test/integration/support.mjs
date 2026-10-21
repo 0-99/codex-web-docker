@@ -333,8 +333,8 @@ export async function appServerFixture(t, { chatgptAuth } = {}) {
   cleanup(() => model.close());
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
-    // Routing tests need the real CLI's ChatGPT response shape. Synthetic JWTs
-    // are accepted only inside this loopback-only fixture, never from a user home.
+    // Routing tests need the real CLI's ChatGPT response shape. The isolation
+    // guard keeps these synthetic credentials away from real services and homes.
     JSON.stringify(chatgptAuth ?? { OPENAI_API_KEY: "ci-local-test-key" }),
   );
   await fs.writeFile(

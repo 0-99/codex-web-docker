@@ -6,7 +6,8 @@ import { format } from "prettier";
 
 // Verify the pinned Desktop's native waiting behavior. No fork timeout patch
 // is needed while the actual local-host factory enables this upstream option.
-// This bundle no longer needs a patch, so prepare_asar leaves it minified.
+// Normalize formatting independently of the unrelated routing patch that now
+// also touches this bundle; this check still exercises the native timeout code.
 const bundle = await format(
   readFileSync("scratch/asar/.vite/build/src-BJv5Mk7n.js", "utf8"),
   { parser: "babel" },
