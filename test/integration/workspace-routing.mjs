@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
+import fs from "node:fs/promises";
+import path from "node:path";
 import {
   appServerFixture,
   childProcess,
@@ -23,8 +25,17 @@ test(
   async (t) => {
     const binary = process.env.CODEX_TEST_CLI_PATH;
     assert.ok(binary);
+    // The actual-image wrapper requires an isolated CODEX_HOME even for a
+    // version probe. Never let it fall back to a runner's existing profile.
+    await fs.mkdir("scratch", { recursive: true });
+    const versionHome = await fs.mkdtemp(
+      path.resolve("scratch/routing-version-"),
+    );
+    t.after(() => fs.rm(versionHome, { recursive: true, force: true }));
     const version = execFileSync(binary, ["--version"], {
       encoding: "utf8",
+      env: { ...process.env, CODEX_HOME: versionHome },
+      timeout: 30000,
     }).trim();
     if (version !== "codex-cli 0.155.1") {
       t.skip(
