@@ -17,7 +17,7 @@ a browser frontend for codex desktop, running on a machine you control.
 > The [example Compose file](examples/docker-compose.yml) provides a standalone stack,
 > with the app-server pinned to the CI-validated version `0.163.0`. Run
 > `docker compose -f examples/docker-compose.yml up -d`; no existing networks
-> or volumes are required. See [first-time setup](DOCKER.md#compose-and-portainer).
+> or volumes are required. See [first-time setup](DOCKER.md#docker-compose).
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
 > for required CI checks and the separate, advisory upgrade candidate. Do not use
 > a floating `latest` tag as the supported CLI baseline.
