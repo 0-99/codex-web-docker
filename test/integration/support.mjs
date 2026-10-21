@@ -21,8 +21,15 @@ export async function until(fn, label, timeout = 15000) {
   throw new Error(`Timed out: ${label}`);
 }
 
-// Dispose dependent resources before their owners, and run every disposer even
-// when an earlier one fails. Node test after-hooks run in registration order.
+/**
+ * Register cleanup after acquiring each resource, sharing this stack with all
+ * dependent fixtures. Reverse acquisition order stops clients before servers
+ * and file writers before deleting their shared home.
+ *
+ * Separate Node test after-hooks run in registration order: deleting the home
+ * first caused ENOTEMPTY races and left processes alive until the CI timeout.
+ * Collect errors so a failed disposer cannot prevent the remaining shutdown.
+ */
 export function fixtureCleanup(t) {
   const disposers = [];
   t.after(async () => {
@@ -120,6 +127,8 @@ export async function pairingGateway(t, appServer) {
   const ws = new WebSocketServer({ server });
   const connections = new Set();
   const requests = [];
+  // Keep both directions for startup failure diagnostics. Traffic comes from
+  // the isolated fixture with dummy credentials and a local model server.
   const traffic = [];
   ws.on("connection", (client) => {
     const remote = appServer.openSocket();
@@ -160,6 +169,8 @@ export async function pairingGateway(t, appServer) {
     remote.on("close", () => client.close());
     remote.on("error", () => client.close());
   });
+  // Join the upstream fixture's stack so this gateway stops before its server.
+  // Standalone gateway tests can instead supply a mock without a cleanup stack.
   const cleanup = appServer.cleanup ?? fixtureCleanup(t);
   cleanup(async () => {
     for (const socket of connections) socket.terminate();
@@ -284,6 +295,8 @@ export async function appServerFixture(t) {
   await fs.mkdir("scratch", { recursive: true });
   const directory = await fs.mkdtemp(path.resolve("scratch/ci-"));
   const cleanup = fixtureCleanup(t);
+  // Register the directory first so it is removed last. Callers must add their
+  // backend/browser resources to this same stack to stop writers before removal.
   cleanup(() => fs.rm(directory, { recursive: true, force: true }));
   const codexHome = path.join(directory, "codex");
   const workspace = path.join(directory, "workspace");
@@ -384,6 +397,8 @@ export async function appServerFixture(t) {
       }
     }, "real app-server listener");
   }
+  // Resolve the current process at shutdown: reconnect tests replace it through
+  // stop()/start(), so capturing the initial process would leak its replacement.
   cleanup(() => serverProcess?.stop());
   await start();
   return {

@@ -14,6 +14,8 @@ import {
   rpcSocket,
 } from "./support.mjs";
 
+// Each iteration owns a fresh CLI home, backend profile and browser. Reusing
+// completed onboarding would hide intermittent stalls in the first-run splash.
 for (let startupRun = 1; startupRun <= 5; startupRun++)
   test(
     `real Desktop resumes saved chats, sends turns, survives reconnect and offers mobile pairing (cold start ${startupRun})`,
@@ -74,6 +76,9 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         {
           CODEX_APP_SERVER_URL: gateway.endpoint,
           CODEX_CLI_PATH: proxy,
+          // Onboarding lives in CODEX_HOME/.codex-global-state.json; resetting
+          // only Electron user data leaves it completed on later cold starts.
+          // Isolate both stores while sharing this run's saved chat with the CLI.
           CODEX_HOME: appServer.codexHome,
           CODEX_WEB_USER_DATA_DIR: path.join(appServer.directory, "web"),
           CODEX_WEB_BASE_PATH: "/ci/nested/",
@@ -128,6 +133,9 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         }
         if (/\/onboarding-page-[^/]+\.js$/.test(url.pathname)) {
           const response = await route.fetch();
+          // These probes target symbols in the pinned upstream Desktop bundle.
+          // Formatting gives the string markers predictable whitespace; symbol
+          // names still need review on upgrades (see UPGRADING.md).
           const source = await format(await response.text(), {
             parser: "babel",
           });
@@ -137,11 +145,15 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
           return route.fulfill({
             response,
             body: source
+              // Record inputs, then return the original isLoading expression
+              // via the comma operator. Do not force any readiness/auth gate.
               .replace(
                 marker,
                 (match) =>
                   `isLoading: (window.__CODEX_CI_ONBOARDING__ = { previous: e, advancing: t, override: n, welcomePending: r, chatgpt: l, contextLoading: d, statsigLoading: p, teenLoading: g }, ${match.slice(match.indexOf(":") + 1)})`,
               )
+              // Observe the chosen wizard step and the splash's focus wait
+              // separately so a stuck page shows which transition is blocked.
               .replace(
                 "  switch (n) {\n    case Z.Start:",
                 "  window.__CODEX_CI_ONBOARDING_STEP__ = n;\n  switch (n) {\n    case Z.Start:",
@@ -208,6 +220,8 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         console.log(
           `Cold start ${startupRun} readiness: ${JSON.stringify(readiness)}`,
         );
+        // Assert isolation without modifying the flag: all five runs must
+        // exercise first-run behavior, rather than inherit a completed profile.
         assert.equal(
           readiness.startup.projectlessOnboardingCompleted,
           false,
@@ -343,6 +357,8 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         );
         assert.deepEqual(errors, []);
       } catch (e) {
+        // Keep evidence from different runs separate. Write RPC first so it
+        // survives even if the broken page cannot produce a screenshot.
         const artifact = `scratch/integration-results/desktop-cold-start-${startupRun}`;
         await fs.mkdir("scratch/integration-results", { recursive: true });
         await fs.writeFile(

@@ -9,6 +9,8 @@ import {
 test("browser focus replaces synthetic Desktop focus without changing other events", () => {
   let focused = true;
   const document = { visibilityState: "visible", hasFocus: () => focused };
+  // Reproduce the startup regression: a hidden native window reports blur while
+  // the real browser tab is focused. Also verify the opposite stale signal below.
   assert.deepEqual(
     withBrowserWindowFocus(
       { type: "electron-window-focus-changed", isFocused: false },
@@ -51,6 +53,8 @@ test("each tab reports focus and visibility changes through its own listener", (
   }
   const first = tab();
   const second = tab();
+  // Two tabs may share a backend, but a focus event must reach only its own
+  // renderer. Disposing one tab must also detach its browser subscriptions.
   first.document.focused = false;
   first.window.dispatchEvent(new Event("blur"));
   assert.equal(first.messages.at(-1).isFocused, false);

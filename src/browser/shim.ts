@@ -189,6 +189,8 @@ export function emitRendererEvent(channel: string, args: unknown[]): void {
 
 function handleIncomingMessage(message: MainToRendererMessage): void {
   if (message.type === "ipc-main-event") {
+    // Only Desktop view messages carry this focus protocol. Translate at delivery
+    // time using the receiving tab, rather than the backend's hidden window.
     emitRendererEvent(
       message.channel,
       message.channel === "codex_desktop:message-for-view"
@@ -508,7 +510,9 @@ export const ipcRenderer = {
         isRecord(args[0]) &&
         args[0].type === "electron-window-focus-request"
       ) {
-        // A hidden server-side BrowserWindow cannot describe this browser tab.
+        // Startup may subscribe after the browser's initial focus event. Answer
+        // its explicit query locally through the same channel as later updates;
+        // the hidden backend window cannot supply this tab's actual focus.
         emitRendererEvent("codex_desktop:message-for-view", [
           browserWindowFocus(document),
         ]);
@@ -659,6 +663,8 @@ export const ipcRenderer = {
   },
 };
 
+// Each tab owns these listeners for its lifetime. Keep Desktop informed after
+// the initial query without sharing focus state between clients of the backend.
 installBrowserWindowFocus(window, document, (message) => {
   emitRendererEvent("codex_desktop:message-for-view", [message]);
 });

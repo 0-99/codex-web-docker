@@ -13,6 +13,8 @@ test("integration cleanup stops writers before removing files and continues afte
   let appServerRunning = true;
   let backendRunning = true;
   const failure = new Error("browser cleanup failed");
+  // Model acquisition order explicitly. Even a failed browser shutdown must
+  // allow both writers to stop before the home-directory disposer runs.
   cleanup(() => {
     assert.equal(appServerRunning, false);
     assert.equal(backendRunning, false);
