@@ -124,6 +124,21 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
             ),
           });
         }
+        if (/\/onboarding-page-[^/]+\.js$/.test(url.pathname)) {
+          const response = await route.fetch();
+          const source = await response.text();
+          const marker =
+            /isLoading:\s*g\s*\|\|\s*\(l\s*&&\s*d\)\s*\|\|\s*t\s*\|\|\s*p\s*\|\|\s*\(n\s*!==\s*`welcome`\s*&&\s*!r\s*&&\s*e\s*==\s*null\)/;
+          assert.ok(marker.test(source), "locate Desktop onboarding readiness");
+          return route.fulfill({
+            response,
+            body: source.replace(
+              marker,
+              (match) =>
+                `isLoading: (window.__CODEX_CI_ONBOARDING__ = { previous: e, advancing: t, override: n, welcomePending: r, chatgpt: l, contextLoading: d, statsigLoading: p, teenLoading: g }, ${match.slice(match.indexOf(":") + 1)})`,
+            ),
+          });
+        }
         return route.continue();
       });
       const page = await context.newPage();
@@ -170,6 +185,9 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
               .isVisible()),
           "Desktop first-run screen or saved chat",
           45000,
+        );
+        console.log(
+          `Cold start ${startupRun} readiness: ${JSON.stringify(await page.evaluate(() => ({ startup: window.__CODEX_CI_STARTUP__, onboarding: window.__CODEX_CI_ONBOARDING__ })))}`,
         );
         if (
           await page
@@ -312,7 +330,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         });
         await fs.writeFile(`${artifact}.html`, await page.content());
         throw new Error(
-          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nOnboarding: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_ONBOARDING__))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
           { cause: e },
         );
       }
