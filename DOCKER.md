@@ -267,7 +267,7 @@ The manifest link uses `crossorigin="use-credentials"`. This is harmless on an
 unprotected installation and lets a reverse proxy protected by Authelia or any
 other cookie-based authentication gateway authorize the manifest request.
 
-## Compose and Portainer
+## Docker Compose
 
 The [example](examples/docker-compose.yml) starts both `codex-cli` and
 `codex-web`, with Compose-managed networks and volumes. No existing network,
@@ -327,7 +327,7 @@ CLI 0.163.0 leaves a symlink there and places the physical socket in
 `/tmp/codex-daemon-1000/`. Containers have separate `/tmp` directories;
 sharing only the old volume therefore exposes the link without its target.
 
-Update an existing Compose or Portainer stack as follows:
+Update an existing Docker Compose deployment as follows:
 
 1. Set the CLI image to `ghcr.io/icoretech/codex-docker:0.163.0`.
 2. Keep `codex_socket:/run/codex` in both services and add
@@ -338,8 +338,8 @@ Update an existing Compose or Portainer stack as follows:
    option from `mode=0770` to `mode=0700`.
 4. Stop both services and remove their stopped containers so they release
    the socket volume. Remove **only the old transient socket volume**
-   corresponding to `codex_socket`. Compose/Portainer normally prefixes its
-   actual name with the project/stack name; confirm its mount was `/run/codex`.
+   corresponding to `codex_socket`. Docker Compose normally prefixes its
+   actual name with the project name; confirm its mount was `/run/codex`.
    Editing the YAML alone does not update options on an existing named volume.
 5. Redeploy/recreate both services. Docker creates the socket volumes with
    the new options. Keep `CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock`
@@ -378,7 +378,7 @@ need separate regression cases; see the container sandbox configuration above.
 
 The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
 to `ghcr.io/icoretech/codex-docker:0.163.0` and uses a shared Unix socket, also
-required by the Mobile Connect fallback. See [setup](#compose-and-portainer).
+required by the Mobile Connect fallback. See [setup](#docker-compose).
 
 `test/integration/images.json` pins the required companion-image test to
 `ghcr.io/icoretech/codex-docker:0.163.0`. CI runs that actual image through chat
