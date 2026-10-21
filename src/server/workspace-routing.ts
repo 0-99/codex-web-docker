@@ -19,7 +19,7 @@ function record(value: unknown): value is Record<string, unknown> {
 
 function denied(): never {
   // Keep credentials, account IDs and backend payloads out of error logs.
-  throw new Error("CLI 0.155.1 legacy workspace route could not be verified");
+  throw new Error("Legacy workspace route could not be verified");
 }
 
 function principal(token: string) {
@@ -70,8 +70,9 @@ function missingRouting(value: unknown): boolean {
 }
 
 /**
- * The 0.155.1 protocol predates workspaceRouting. Its Desktop legacy branch
- * preserves the configured request URL; it does NOT discover a destination.
+ * Some app-server protocols omit workspaceRouting. When the operator opts in,
+ * Desktop's legacy branch preserves the configured request URL; it does NOT
+ * discover a destination. Version numbers are not a substitute for this proof.
  * Only authorize that branch after the authenticated accounts endpoint explicitly
  * confirms that the selected workspace permits this very origin without a
  * routing override. Never manufacture an account/read workspaceRouting value.

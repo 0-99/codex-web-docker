@@ -88,7 +88,16 @@ addition to these delays. The sequence resets after successful recovery.
 | `CODEX_APP_SERVER_RECONNECT_FAILURE_ACTION` | `terminate-parent` in Docker  | On finite retry exhaustion: `terminate-parent` or `exit` (only the proxy)           |
 | `CODEX_WEB_USER_DATA_DIR`                   | `/home/node/.codex` in Docker | Writable Electron user-data directory for web settings, state and artifact sessions |
 | `CODEX_WEB_DISABLE_INTERNAL_APP_MCP`        | `1` in Docker                 | Disables the desktop-only `codex_app` MCP integration for an external app-server    |
+| `CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING` | unset (disabled) | Set to exactly `1` to permit authenticated verification when `workspaceRouting` is absent; policy checks remain mandatory |
 | `CODEX_WEB_ELECTRON_DEBUG`                  | unset                         | Set to `1` for verbose Electron-stub calls                                          |
+
+The legacy routing opt-in belongs on the **Web container**, not the CLI. It is
+independent of CLI version and does not override native routing objects, explicit
+`null`, account mismatches or managed backend/residency/network/FedRAMP policies.
+See [verified legacy routing](docs/verified-legacy-routing.md) for the proof
+requirements and tests. A separately approved live test is a one-time initial
+acceptance; subsequent releases use automated checks rather than recurring
+manual live tests. No production configuration is changed automatically.
 
 For example, `CODEX_APP_SERVER_RETRY_DELAYS_MS=5000,15000` and
 `CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS=8` make one initial attempt and at most eight

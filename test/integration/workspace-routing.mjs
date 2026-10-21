@@ -17,6 +17,7 @@ import {
   initializeRequest,
   routeUrl,
   wireVerifier,
+  optInEnv,
 } from "../support/workspace-routing.mjs";
 
 test(
@@ -39,7 +40,7 @@ test(
     }).trim();
     if (version !== "codex-cli 0.155.1") {
       t.skip(
-        "The compatibility exception applies only to stable 0.155.1; the supported-image job exercises it",
+        "This regression fixture targets supported CLI 0.155.1; version-independent opt-in is covered by unit tests",
       );
       return;
     }
@@ -115,7 +116,14 @@ test(
         return Response.json(accounts());
       },
     );
-    const routing = routingClient(client);
+    // Off is the production default: no extra backend discovery is attempted.
+    const disabled = routingClient(client);
+    await assert.rejects(
+      disabled.get(false),
+      /Workspace routing is unavailable/,
+    );
+    assert.equal(discoveries, 0);
+    const routing = routingClient(client, optInEnv);
     const auth = await routing.get(false);
     assert.equal(auth.routing.kind, "legacy");
     assert.equal(discoveries, 1);

@@ -1,4 +1,4 @@
-# Workspace routing compatibility with stable CLI 0.155.1
+# Opt-in to verified legacy workspace routing
 
 ## Regression and protocol evidence
 
@@ -49,12 +49,23 @@ endpoint. A list entry identifies the workspace with `id` and supplies
 `workspace_backend_origin` and `account_routing_override`. The older map form
 normalizes to missing routing metadata and cannot authorize this exception.
 
-## Narrow compatibility rule
+## Explicit opt-in instead of a version exception
 
-The patch adds a separate branch for exact version `0.155.1` and a genuinely
-absent `workspaceRouting` property. It preserves the existing upstream version
-range and native object/null handling. All existing backend, residency,
-application-network and FedRAMP guards remain prerequisites.
+Set `CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING=1` on the **Web backend** to allow
+additional discovery when the app-server genuinely omits `workspaceRouting`.
+The option is disabled by default; only the exact string `1` enables it. Unset,
+`0`, `false` and other values leave the additional path disabled. Compose lists
+it as a commented option and does not enable it automatically.
+
+The fork does not select this path by app-server version. `0.155.1` remains the
+concrete regression and supported-image test case, not a runtime allowlist.
+Compatibility with another version depends on its actual RPC responses and the
+same authenticated proof; enabling the option is not a blanket support claim.
+
+The existing upstream version range and native object/null handling remain
+unchanged. A supplied routing object is processed normally; explicit `null` or
+an invalid object never triggers the additional path. All existing backend,
+residency, application-network and FedRAMP guards remain prerequisites.
 
 The local stdio connection supplies Desktop's existing configured URL builder,
 auth header builder and application-network transport to the fork-owned
@@ -85,8 +96,8 @@ constant URL and no attempt to bypass residency requirements.
 `test/workspace-routing.test.mjs` executes the patched Desktop discovery class
 with its bundled parsers, claims reader and semver functions, and its URL adapter.
 It covers omitted/null/valid/malformed routing, native and compatibility account
-mismatches, every managed-policy field, FedRAMP, exact version gating, endpoint
-failures, missing/duplicate workspaces, different backend/override, changed
+mismatches, every managed-policy field, FedRAMP, default-off/exact opt-in,
+version-independent verification, the unchanged upstream range, endpoint failures, missing/duplicate workspaces, different backend/override, changed
 principals/policies and cancellation. Relay tests check unchanged capabilities
 and account/policy RPC forwarding.
 
@@ -94,19 +105,34 @@ and account/policy RPC forwarding.
 CLI `0.155.1` in the existing loopback-only CI namespace. It uses synthetic
 ChatGPT credentials (rather than the old API-key/no-account fixture), reads the
 real account and requirements responses through the relay, executes the v0.4.2
-Desktop routing class and starts a real CLI thread and turn against the local
-model fixture. The accounts endpoint's routing response is simulated and clearly
+Desktop routing class with opt-in disabled and enabled, confirms that the
+additional path is blocked without opt-in, and starts a real CLI thread and turn
+against the local model fixture when enabled. The accounts endpoint's routing response is simulated and clearly
 marked as such. This proves binary/protocol integration, not routing entitlement
 for an existing live account.
 
-The existing Desktop/browser integration suite remains required. A live account
-test below is an additional acceptance requirement, not something the offline
-fixture replaces. No live credentials belong in CI or diagnostic artifacts.
+### Permanent release checks
 
-## Live acceptance test — requires explicit user approval
+Routine releases are gated by automated tests: both opt-in settings, successful
+routing verification and every rejection case, the actual supported CLI images,
+and the existing real Desktop/browser flows (including starting chats and turns).
+Once the initial live acceptance below is complete, it is **not** a recurring
+manual release gate. These automated checks remain the ongoing regression guard.
 
-Do not change, restart, upgrade or redeploy the productive Web or CLI containers
-for this procedure. It has not been performed by the implementation task.
+Offline tests simulate the backend's account response. The one-time live
+acceptance establishes that the initial implementation also works with the
+existing login and real workspace metadata. It does not convert simulated CI
+responses into a claim about every future account/backend state. No live
+credentials belong in CI or diagnostic artifacts.
+
+## One-time live acceptance — requires explicit user approval
+
+This is a transitional first acceptance of the opt-in implementation, not a
+per-release checklist. It has not been performed by the implementation task.
+Repeat live diagnostics only for a concrete failure or a deliberate fundamental
+change to routing/authentication when that investigation needs them; define and
+approve their scope separately. Do not change, restart, upgrade or redeploy the
+productive Web or CLI containers for this procedure.
 
 Before execution, present the user with the reviewed PR revision, the exact
 candidate Web image, its separate test port/profile and the proposed connection
@@ -115,6 +141,8 @@ to the unchanged existing CLI. Obtain approval specifically for that test.
 - Build the candidate Web image from that revision without publishing a release.
   Run it as a separate, temporary Web instance, with its own user-data directory
   and a loopback-bound test port or equivalent access restriction.
+- Enable `CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING=1` only on the temporary Web
+  instance. Leave the productive environment unchanged.
 - Connect it to the existing app-server using the approved socket/endpoint. Keep
   the production CLI image ID and configuration unchanged. Use its existing
   login through RPC; do not copy auth files, force token refresh or log tokens.
@@ -130,5 +158,6 @@ to the unchanged existing CLI. Obtain approval specifically for that test.
 If the actual bootstrap response lacks the required proof, keep the failure
 closed. Record which requirement was not met, without exposing account IDs or
 backend payloads. Do not silently replace the CLI: a version proposal would be
-separate, supported by the concrete unmet requirement and its own real-binary
-and live acceptance evidence.
+separate, supported by the concrete unmet requirement and real-binary evidence.
+Any need for further live diagnostics is decided for that concrete investigation;
+it does not create a recurring manual release gate.

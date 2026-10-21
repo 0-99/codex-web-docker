@@ -19,12 +19,12 @@
          Kn(e)?.isFedramp !== !0
        )
          return { kind: `legacy` };
-+      // Stable CLI 0.155.1 omits workspaceRouting despite the newer version
-+      // number. Do not widen the upstream range: verify only this exact case,
-+      // keeping null, supplied routes and every managed-policy guard intact.
++      // Operators may opt into verifying a missing routing capability. Keep
++      // the upstream version range intact: this additional path depends on an
++      // authenticated routing proof, never on a guessed app-server version.
 +      if (
 +        !Object.hasOwn(t, `workspaceRouting`) &&
-+        c === `0.155.1` &&
++        process.env.CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING === `1` &&
 +        s?.chatgptBaseUrl == null &&
 +        s?.enforceResidency == null &&
 +        s?.application?.network == null &&
@@ -89,7 +89,7 @@
      e.toLowerCase() === `x-openai-account-routing-override` && delete t[e];
 -  if (n.routing.kind === `legacy`) return e;
 +  if (n.routing.kind === `legacy`) {
-+    // The 0.155.1 exception proves only the configured origin. Do not reuse
++    // The opted-in legacy path proves only the configured origin. Do not reuse
 +    // that proof for a different OpenAI service or a changed bootstrap URL.
 +    if (n.routing.codexWebVerified != null &&
 +        new URL(e).origin !== n.routing.codexWebVerified.origin)

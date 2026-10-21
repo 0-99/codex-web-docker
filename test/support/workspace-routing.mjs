@@ -22,31 +22,32 @@ function between(source, start, end) {
   assert.ok(from >= 0 && to > from, `locate pinned Desktop ${start}`);
   return source.slice(from, to);
 }
-const context = vm.createContext({
-  t: schemas,
-  n: versions,
-  Buffer,
-  URL,
-  AbortController,
-  DOMException,
-  U: () => {
-    let resolve;
-    const promise = new Promise((r) => {
-      resolve = r;
-    });
-    return { promise, resolve };
-  },
-  ue: async (promise, signal) => {
-    const value = await promise;
-    signal.throwIfAborted();
-    return value;
-  },
-});
+function desktopContext(env) {
+  return vm.createContext({
+    process: { env },
+    t: schemas,
+    n: versions,
+    Buffer,
+    URL,
+    AbortController,
+    DOMException,
+    U: () => {
+      let resolve;
+      const promise = new Promise((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    },
+    ue: async (promise, signal) => {
+      const value = await promise;
+      signal.throwIfAborted();
+      return value;
+    },
+  });
+}
+const context = desktopContext({});
 vm.runInContext(between(bundle, "var Hn =", "function Jn("), context);
-const Routing = vm.runInContext(
-  "let " + between(bundle, "TI = t.O({", "function AI(") + "; kI",
-  context,
-);
+export const optInEnv = { CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING: "1" };
 export const routeUrl = vm.runInNewContext(
   "(" + between(bootstrap, "function rn(e, t, n)", "function an(") + ")",
   { URL },
@@ -93,7 +94,7 @@ export const accounts = () => ({
 export const accountUrl =
   "https://bootstrap.example.invalid/backend-api/wham/accounts/check";
 
-export function fixture(overrides = {}) {
+export function fixture(overrides = {}, env = optInEnv) {
   const state = {
     account: account(),
     requirements: requirements(),
@@ -123,9 +124,17 @@ export function fixture(overrides = {}) {
       },
       readState: async () => state,
     });
-  return { state, client, requests, routing: new Routing(client, () => {}) };
+  return { state, client, requests, routing: routingClient(client, env) };
 }
-export function routingClient(client) {
+export function routingClient(client, env = {}) {
+  // Each simulated host owns its environment, just like a separate backend
+  // process. Tests must not enable compatibility by mutating global process.env.
+  const local = desktopContext(env);
+  vm.runInContext(between(bundle, "var Hn =", "function Jn("), local);
+  const Routing = vm.runInContext(
+    "let " + between(bundle, "TI = t.O({", "function AI(") + "; kI",
+    local,
+  );
   return new Routing(client, () => {});
 }
 

@@ -11,9 +11,10 @@ import {
   routeUrl,
   initializeRequest,
   wireVerifier,
+  optInEnv,
 } from "./support/workspace-routing.mjs";
 
-test("0.155.1 without workspaceRouting uses only a verified same-origin legacy route", async () => {
+test("explicit opt-in without workspaceRouting uses only a verified same-origin legacy route", async () => {
   const { routing, requests } = fixture();
   const auth = await routing.get(false);
   assert.equal(auth.routing.kind, "legacy");
@@ -35,34 +36,39 @@ test("0.155.1 without workspaceRouting uses only a verified same-origin legacy r
 });
 
 test("explicit null and malformed routes never fall back", async () => {
-  for (const value of [null, {}, { chatgptAccountId: "wrong" }]) {
-    const f = fixture({ account: { ...account(), workspaceRouting: value } });
-    await assert.rejects(f.routing.get(false));
-    assert.equal(f.requests.length, 0);
-  }
+  for (const env of [{}, optInEnv])
+    for (const value of [undefined, null, {}, { chatgptAccountId: "wrong" }]) {
+      const f = fixture(
+        { account: { ...account(), workspaceRouting: value } },
+        env,
+      );
+      await assert.rejects(f.routing.get(false));
+      assert.equal(f.requests.length, 0);
+    }
 });
 
 test("native routing objects retain their destination and account binding", async () => {
-  for (const id of ["ci-account", "wrong-account"]) {
-    const workspaceRouting = {
-      chatgptAccountId: id,
-      backendOrigin: "https://workspace.example.invalid",
-      accountRoutingOverride: "us",
-    };
-    const f = fixture({ account: { ...account(), workspaceRouting } });
-    if (id !== "ci-account")
-      await assert.rejects(f.routing.get(false), /does not match/);
-    else {
-      const auth = await f.routing.get(false);
-      const headers = {};
-      assert.equal(
-        routeUrl("https://bootstrap.example.invalid/path?x=1", headers, auth),
-        "https://workspace.example.invalid/path?x=1",
-      );
-      assert.equal(headers["X-OpenAI-Account-Routing-Override"], "us");
+  for (const env of [{}, optInEnv])
+    for (const id of ["ci-account", "wrong-account"]) {
+      const workspaceRouting = {
+        chatgptAccountId: id,
+        backendOrigin: "https://workspace.example.invalid",
+        accountRoutingOverride: "us",
+      };
+      const f = fixture({ account: { ...account(), workspaceRouting } }, env);
+      if (id !== "ci-account")
+        await assert.rejects(f.routing.get(false), /does not match/);
+      else {
+        const auth = await f.routing.get(false);
+        const headers = {};
+        assert.equal(
+          routeUrl("https://bootstrap.example.invalid/path?x=1", headers, auth),
+          "https://workspace.example.invalid/path?x=1",
+        );
+        assert.equal(headers["X-OpenAI-Account-Routing-Override"], "us");
+      }
+      assert.equal(f.requests.length, 0);
     }
-    assert.equal(f.requests.length, 0);
-  }
 });
 
 const policies = [
@@ -95,17 +101,41 @@ test("FedRAMP, malformed claims and missing account/user fail closed", async () 
   }
 });
 
-test("exception does not extend the version range or replace the older upstream path", async () => {
-  for (const version of ["0.155.0", "0.155.2", "0.155.1-alpha.1", "0.156.0"]) {
-    const f = fixture();
-    f.client.appServerVersion = version;
-    await assert.rejects(f.routing.get(false));
+test("additional compatibility is disabled by default and only exact opt-in enables it", async () => {
+  for (const value of [undefined, "", "0", "false", "true", "yes", " 1 "]) {
+    const env =
+      value === undefined
+        ? {}
+        : { CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING: value };
+    const f = fixture({}, env);
+    await assert.rejects(
+      f.routing.get(false),
+      /Workspace routing is unavailable/,
+    );
     assert.equal(f.requests.length, 0);
   }
-  const f = fixture();
-  f.client.appServerVersion = "0.154.0";
-  assert.equal((await f.routing.get(false)).routing.kind, "legacy");
-  assert.equal(f.requests.length, 0);
+});
+
+test("opt-in verifies capabilities independently of version while preserving upstream behavior", async () => {
+  for (const version of [
+    "0.155.0",
+    "0.155.1",
+    "0.155.2",
+    "0.155.1-alpha.1",
+    "0.156.0",
+    null,
+  ]) {
+    const f = fixture();
+    f.client.appServerVersion = version;
+    assert.equal((await f.routing.get(false)).routing.kind, "legacy");
+    assert.equal(f.requests.length, 1);
+  }
+  for (const env of [{}, { CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING: "1" }]) {
+    const f = fixture({}, env);
+    f.client.appServerVersion = "0.154.0";
+    assert.equal((await f.routing.get(false)).routing.kind, "legacy");
+    assert.equal(f.requests.length, 0);
+  }
 });
 
 function probe(changes = {}) {
