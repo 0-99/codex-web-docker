@@ -38,6 +38,23 @@ assert.deepEqual(cli.command, [
   "--listen",
   "unix:///run/codex/app-server.sock",
 ]);
+// Validate the actual example mounts before using them in the cross-container probe.
+for (const service of [cli, compose.services["codex-web"]]) {
+  for (const [source, target] of [
+    ["codex_socket", "/run/codex"],
+    ["codex_daemon", "/tmp/codex-daemon-1000"],
+  ]) {
+    assert.ok(
+      service.volumes.some(
+        (mount) =>
+          mount.type === "volume" &&
+          mount.source === source &&
+          mount.target === target,
+      ),
+      `Both services must share ${source} at ${target}`,
+    );
+  }
+}
 const security = cli.security_opt;
 assert.deepEqual(security, ["seccomp=unconfined", "systempaths=unconfined"]);
 const securityArgs = security.flatMap((option) => ["--security-opt", option]);

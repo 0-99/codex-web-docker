@@ -34,8 +34,8 @@ listener. Compatible WebSocket endpoints and authenticating relays remain usable
 
 Keep the app-server endpoint private. When using a Unix socket, the frontend and
 app-server must use matching numeric UIDs so the frontend can connect to the
-CLI's owner-only socket. The example initializes both dedicated socket volumes with mode 0700
-for UID 1000; account state remains in a separate app-server home volume.
+CLI's owner-only socket. The example initializes both dedicated socket volumes
+with mode 0700 for UID 1000; account state remains in a separate app-server home volume.
 
 For a Unix socket, mount the same directory or named volume in both containers,
 start the server with an absolute socket path, and configure the web container:
@@ -290,8 +290,8 @@ The socket healthcheck verifies listener presence, not account authorization.
 Both containers mount the same workspace at `/workspace` and
 `/home/node/Documents/Codex`, including projectless Desktop conversations.
 Account/configuration data and web state use separate persistent home volumes.
-The two socket volumes are small tmpfs mounts with UID/GID 1000 and mode 0700; it holds no
-persistent account data and needs no initialization container. Docker creates
+The two socket volumes are small tmpfs mounts with UID/GID 1000 and mode 0700; they hold no
+persistent account data and need no initialization container. Docker creates
 project-scoped resource names. Existing installation-specific volumes are not
 automatically reused: explicitly map their names in your deployment override
 if you want to retain existing data rather than start fresh.
