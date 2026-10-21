@@ -13,8 +13,9 @@
 
 services:
   codex-cli:
-    # Keep this version aligned with test/integration/images.json's supported image.
-    image: ghcr.io/icoretech/codex-docker:0.163.0
+    # Both 0.163.0 (default) and 0.155.1 are required compatibility targets in CI.
+    # Set CODEX_CLI_VERSION=0.155.1 in .env to keep using the older CLI.
+    image: ghcr.io/icoretech/codex-docker:${CODEX_CLI_VERSION:-0.163.0}
     init: true
     restart: unless-stopped
     working_dir: /workspace

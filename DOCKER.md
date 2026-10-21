@@ -320,6 +320,28 @@ reach the UI can operate the connected Codex instance with that instance's
 permissions. Keep the app-server private and place an authentication layer or
 VPN in front of the web UI before exposing it beyond a trusted network.
 
+### Choosing a supported CLI version
+
+Both **0.155.1 and 0.163.0** are supported during the transition. There is no
+requirement to upgrade an existing 0.155.1 installation or change its socket
+volumes while it stays on that version.
+
+The example defaults to 0.163.0. To select the older supported version, set
+this in the Compose project's `.env` file:
+
+```dotenv
+CODEX_CLI_VERSION=0.155.1
+```
+
+Use `CODEX_CLI_VERSION=0.163.0` for the newer version. The updated example's
+two socket volumes and mode 0700 work with both versions; 0.155.1 simply does
+not use the protected daemon directory. CI requires the real-container tests
+and the fresh-volume Compose probes to pass for both versions.
+
+Changing an existing 0.155.1 deployment to 0.163.0 also requires the socket
+migration below. Changing back to 0.155.1 can retain the updated volume layout.
+Support for the older version should only be removed in an explicit later change.
+
 ### Upgrading an existing stack to CLI 0.163.0
 
 CLI 0.155.1 placed the socket directly at `/run/codex/app-server.sock`.
@@ -329,7 +351,8 @@ sharing only the old volume therefore exposes the link without its target.
 
 Update an existing Docker Compose deployment as follows:
 
-1. Set the CLI image to `ghcr.io/icoretech/codex-docker:0.163.0`.
+1. Set `CODEX_CLI_VERSION=0.163.0` in `.env` when using the example, or set
+   the CLI image to `ghcr.io/icoretech/codex-docker:0.163.0` in your own Compose file.
 2. Keep `codex_socket:/run/codex` in both services and add
    `codex_daemon:/tmp/codex-daemon-1000` to **both** services.
 3. Add the top-level `codex_daemon` volume definition from the
@@ -368,8 +391,9 @@ action's matching tags, including `latest` for a stable semantic version.
 
 ### App-server image compatibility checks
 
-The required companion image is `0.163.0` (`linux/amd64`). Its full offline
-integration suite must pass before this upgrade is merged or published.
+Both companion images `0.163.0` and `0.155.1` are supported (`linux/amd64`).
+Each has a required real-container integration case; failures in either block
+release publication. The floating `latest` probe remains advisory.
 The previous `0.155.1` baseline passed on 2026-10-18:
 [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
 This validates the covered local workflows. Shell-tool execution inside the
@@ -377,11 +401,11 @@ CLI sandbox, live account enrollment and known failures outside these flows
 need separate regression cases; see the container sandbox configuration above.
 
 The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
-to `ghcr.io/icoretech/codex-docker:0.163.0` and uses a shared Unix socket, also
+to `ghcr.io/icoretech/codex-docker:0.163.0` by default and uses a shared Unix socket, also
 required by the Mobile Connect fallback. See [setup](#docker-compose).
 
-`test/integration/images.json` pins the required companion-image test to
-`ghcr.io/icoretech/codex-docker:0.163.0`. CI runs that actual image through chat
+`test/integration/images.json` pins `supported` to version `0.163.0` and
+`supported-previous` to version `0.155.1`. CI runs both actual images through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
 pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
 checks the Compose CLI image pin, creates the configured tmpfs socket volume,

@@ -7,11 +7,17 @@ const selected = process.argv[2];
 const config = JSON.parse(
   await fs.readFile(new URL("./images.json", import.meta.url), "utf8"),
 );
-assert.ok(selected === "supported" || selected === "candidate");
+const requiredContainer =
+  selected === "supported" || selected === "supported-previous";
+assert.ok(requiredContainer || selected === "candidate");
 const { image, expectedCliVersion } = config[selected];
 function docker(args) {
   return execFileSync("docker", args, {
     encoding: "utf8",
+    env: {
+      ...process.env,
+      ...(requiredContainer ? { CODEX_CLI_VERSION: expectedCliVersion } : {}),
+    },
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
 }
@@ -26,11 +32,11 @@ const compose = JSON.parse(
   ]),
 );
 const cli = compose.services["codex-cli"];
-if (selected === "supported") {
+if (requiredContainer) {
   assert.equal(
     cli.image,
     image,
-    "Example Compose must use the supported image from images.json",
+    "Example Compose must select the requested supported image from images.json",
   );
 }
 assert.deepEqual(cli.command, [
@@ -77,7 +83,7 @@ if (expectedCliVersion)
 console.log(`${selected}: ${image}\nDigest: ${digest}\n${version}`);
 // Exercise the example's fresh volumes with the image's default user. These
 // probes have no network, account credentials or model requests.
-if (selected === "supported") {
+if (requiredContainer) {
   const socket = `codex-ci-socket-${process.pid}`;
   const workspace = `codex-ci-workspace-${process.pid}`;
   const daemon = `codex-ci-daemon-${process.pid}`;
@@ -160,7 +166,9 @@ if (selected === "supported") {
       "/bin/sh",
       digest,
       "-ec",
-      'test -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock && test -S "$(readlink /run/codex/app-server.sock)"',
+      selected === "supported"
+        ? 'test -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock && test -S "$(readlink /run/codex/app-server.sock)"'
+        : "test ! -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock",
     ]);
     console.log(
       "Compose default UID 1000, tmpfs socket, healthcheck and both workspace paths verified",

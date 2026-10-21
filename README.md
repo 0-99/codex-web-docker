@@ -15,7 +15,9 @@ a browser frontend for codex desktop, running on a machine you control.
 > default. Static assets, navigation, uploads, and WebSockets use the configured
 > path automatically.
 > The [example Compose file](examples/docker-compose.yml) provides a standalone stack,
-> with the app-server pinned to the CI-validated version `0.163.0`. Run
+> with CLI `0.163.0` by default. Both `0.163.0` and `0.155.1` are supported
+> and required CI targets; set `CODEX_CLI_VERSION=0.155.1` in `.env` to select
+> the older version. Existing `0.155.1` deployments can keep their socket setup. Run
 > `docker compose -f examples/docker-compose.yml up -d`; no existing networks
 > or volumes are required. See [first-time setup](DOCKER.md#docker-compose).
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
