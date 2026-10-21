@@ -101,6 +101,7 @@ export async function pairingGateway(t, appServer) {
   const ws = new WebSocketServer({ server });
   const connections = new Set();
   const requests = [];
+  const traffic = [];
   ws.on("connection", (client) => {
     const remote = appServer.openSocket();
     connections.add(client);
@@ -112,6 +113,7 @@ export async function pairingGateway(t, appServer) {
     client.on("message", (raw) => {
       const data = String(raw);
       const message = JSON.parse(data);
+      traffic.push({ direction: "request", message });
       if (
         message.method === "remoteControl/enable" ||
         message.method === "remoteControl/pairing/start"
@@ -129,6 +131,10 @@ export async function pairingGateway(t, appServer) {
       else queued.push(data);
     });
     remote.on("message", (data) => {
+      traffic.push({
+        direction: "response",
+        message: JSON.parse(String(data)),
+      });
       if (client.readyState === WebSocket.OPEN) client.send(String(data));
     });
     client.on("close", () => remote.terminate());
@@ -143,7 +149,7 @@ export async function pairingGateway(t, appServer) {
   });
   server.listen(socketPath);
   await once(server, "listening");
-  return { endpoint: `unix://${socketPath}`, requests };
+  return { endpoint: `unix://${socketPath}`, requests, traffic };
 }
 
 async function modelServer() {

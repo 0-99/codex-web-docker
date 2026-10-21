@@ -138,7 +138,9 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         }),
         async (button) => {
           await button.click();
-          console.log(`Cold start ${startupRun}: dismissed real model promotion`);
+          console.log(
+            `Cold start ${startupRun}: dismissed real model promotion`,
+          );
         },
       );
       const errors = [];
@@ -299,16 +301,18 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         );
         assert.deepEqual(errors, []);
       } catch (e) {
+        const artifact = `scratch/integration-results/desktop-cold-start-${startupRun}`;
         await fs.mkdir("scratch/integration-results", { recursive: true });
-        await page.screenshot({
-          path: "scratch/integration-results/desktop-failure.png",
-        });
         await fs.writeFile(
-          "scratch/integration-results/desktop-failure.html",
-          await page.content(),
+          `${artifact}-rpc.json`,
+          JSON.stringify(gateway.traffic, null, 2),
         );
+        await page.screenshot({
+          path: `${artifact}.png`,
+        });
+        await fs.writeFile(`${artifact}.html`, await page.content());
         throw new Error(
-          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
+          `${e.message}\nStartup: ${JSON.stringify(await page.evaluate(() => window.__CODEX_CI_STARTUP__))}\nRPC: ${JSON.stringify(gateway.traffic)}\nURL: ${page.url()}\nBrowser: ${diagnostics.slice(-15).join("\n")}\nPage: ${(await page.locator("body").innerText()).slice(-5000)}\nErrors: ${errors.join("\n")}\nBackend: ${backend.log()}\nApp-server: ${appServer.log()}`,
           { cause: e },
         );
       }
