@@ -34,7 +34,7 @@ listener. Compatible WebSocket endpoints and authenticating relays remain usable
 
 Keep the app-server endpoint private. When using a Unix socket, the frontend and
 app-server must use matching numeric UIDs so the frontend can connect to the
-CLI's owner-only socket. The example initializes the dedicated socket volume
+CLI's owner-only socket. The example initializes both dedicated socket volumes with mode 0700
 for UID 1000; account state remains in a separate app-server home volume.
 
 For a Unix socket, mount the same directory or named volume in both containers,
@@ -45,7 +45,19 @@ environment:
   CODEX_APP_SERVER_URL: unix:///run/codex/app-server.sock
 volumes:
   - codex-app-server-socket:/run/codex
+  - codex-daemon-socket:/tmp/codex-daemon-1000
 ```
+
+CLI 0.163.0 creates the physical socket under `/tmp/codex-daemon-<UID>`
+and leaves an absolute symlink at the `--listen` path. Both containers must
+mount that protected directory at the same absolute path in addition to
+`/run/codex`. Sharing only the alias produces a dangling link. The alias parent
+must also prevent group/other writes: use mode 0700, replacing the older 0770.
+For an existing stack, add the daemon volume to both services and recreate the
+transient `codex_socket` volume with the updated options while both services
+are stopped. Preserve the account, settings and workspace volumes; do not use
+`docker compose down -v`. Then recreate both services with the new CLI pin.
+Custom numeric UIDs must also change the daemon mount path and volume owner.
 
 ### Mobile Connect pairing
 
@@ -278,7 +290,7 @@ The socket healthcheck verifies listener presence, not account authorization.
 Both containers mount the same workspace at `/workspace` and
 `/home/node/Documents/Codex`, including projectless Desktop conversations.
 Account/configuration data and web state use separate persistent home volumes.
-The socket volume is a small tmpfs with UID/GID 1000 and mode 0770; it holds no
+The two socket volumes are small tmpfs mounts with UID/GID 1000 and mode 0700; it holds no
 persistent account data and needs no initialization container. Docker creates
 project-scoped resource names. Existing installation-specific volumes are not
 automatically reused: explicitly map their names in your deployment override
@@ -320,18 +332,20 @@ action's matching tags, including `latest` for a stable semantic version.
 
 ### App-server image compatibility checks
 
-The actual `0.155.1` image passed the full offline integration suite on
-2026-10-18 (`linux/amd64`): [validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
+The required companion image is `0.163.0` (`linux/amd64`). Its full offline
+integration suite must pass before this upgrade is merged or published.
+The previous `0.155.1` baseline passed on 2026-10-18:
+[validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
 This validates the covered local workflows. Shell-tool execution inside the
 CLI sandbox, live account enrollment and known failures outside these flows
 need separate regression cases; see the container sandbox configuration above.
 
 The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
-to `ghcr.io/icoretech/codex-docker:0.155.1` and uses a shared Unix socket, also
+to `ghcr.io/icoretech/codex-docker:0.163.0` and uses a shared Unix socket, also
 required by the Mobile Connect fallback. See [setup](#compose-and-portainer).
 
 `test/integration/images.json` pins the required companion-image test to
-`ghcr.io/icoretech/codex-docker:0.155.1`. CI runs that actual image through chat
+`ghcr.io/icoretech/codex-docker:0.163.0`. CI runs that actual image through chat
 creation, saved history, restart/reconnect, mobile layout, reload and the offline
 pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
 checks the Compose CLI image pin, creates the configured tmpfs socket volume,

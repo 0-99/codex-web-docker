@@ -4,7 +4,7 @@ a browser frontend for codex desktop, running on a machine you control.
 
 > This fork also provides a CLI-free multi-architecture Docker image
 > that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
-> [`ghcr.io/icoretech/codex-docker:0.155.1`](https://github.com/icoretech/codex-docker)
+> [`ghcr.io/icoretech/codex-docker:0.163.0`](https://github.com/icoretech/codex-docker)
 > is one possible companion image when running the Codex CLI in another
 > container, but it is not a dependency. The app-server does not have to run in
 > Docker; it can also run natively on the Docker host or on another reachable
@@ -15,7 +15,7 @@ a browser frontend for codex desktop, running on a machine you control.
 > default. Static assets, navigation, uploads, and WebSockets use the configured
 > path automatically.
 > The [example Compose file](examples/docker-compose.yml) provides a standalone stack,
-> with the app-server pinned to the CI-validated version `0.155.1`. Run
+> with the app-server pinned to the CI-validated version `0.163.0`. Run
 > `docker compose -f examples/docker-compose.yml up -d`; no existing networks
 > or volumes are required. See [first-time setup](DOCKER.md#compose-and-portainer).
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)

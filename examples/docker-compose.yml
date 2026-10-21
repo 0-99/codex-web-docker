@@ -14,7 +14,7 @@
 services:
   codex-cli:
     # Keep this version aligned with test/integration/images.json's supported image.
-    image: ghcr.io/icoretech/codex-docker:0.155.1
+    image: ghcr.io/icoretech/codex-docker:0.163.0
     init: true
     restart: unless-stopped
     working_dir: /workspace
@@ -42,6 +42,8 @@ services:
       # see the same workspace here as well as at /workspace.
       - codex_workspace:/home/node/Documents/Codex
       - codex_socket:/run/codex
+      # CLI 0.163 publishes a symlink to its protected socket in this directory.
+      - codex_daemon:/tmp/codex-daemon-1000
 
     networks:
       - cli_egress
@@ -91,6 +93,8 @@ services:
       - codex_workspace:/workspace
       - codex_workspace:/home/node/Documents/Codex
       - codex_socket:/run/codex
+      # CLI 0.163 publishes a symlink to its protected socket in this directory.
+      - codex_daemon:/tmp/codex-daemon-1000
     ports:
       # Ready for local use without a reverse proxy. Authenticate the web UI
       # at your proxy/VPN before exposing it beyond a trusted network.
@@ -111,7 +115,15 @@ volumes:
     driver_opts:
       type: tmpfs
       device: tmpfs
-      o: "size=64k,uid=1000,gid=1000,mode=0770"
+      o: "size=64k,uid=1000,gid=1000,mode=0700"
+
+  # Physical sockets behind /run/codex aliases; share the exact absolute path.
+  codex_daemon:
+    driver: local
+    driver_opts:
+      type: tmpfs
+      device: tmpfs
+      o: "size=64k,uid=1000,gid=1000,mode=0700"
 
 networks:
   # Only the CLI gets outbound connectivity for OpenAI and external MCP servers.

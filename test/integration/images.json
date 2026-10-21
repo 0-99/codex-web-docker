@@ -1,7 +1,7 @@
 {
   "supported": {
-    "image": "ghcr.io/icoretech/codex-docker:0.155.1",
-    "expectedCliVersion": "0.155.1"
+    "image": "ghcr.io/icoretech/codex-docker:0.163.0",
+    "expectedCliVersion": "0.163.0"
   },
   "candidate": {
     "image": "ghcr.io/icoretech/codex-docker:latest"
