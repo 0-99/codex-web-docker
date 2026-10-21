@@ -53,11 +53,9 @@ and leaves an absolute symlink at the `--listen` path. Both containers must
 mount that protected directory at the same absolute path in addition to
 `/run/codex`. Sharing only the alias produces a dangling link. The alias parent
 must also prevent group/other writes: use mode 0700, replacing the older 0770.
-For an existing stack, add the daemon volume to both services and recreate the
-transient `codex_socket` volume with the updated options while both services
-are stopped. Preserve the account, settings and workspace volumes; do not use
-`docker compose down -v`. Then recreate both services with the new CLI pin.
 Custom numeric UIDs must also change the daemon mount path and volume owner.
+For existing deployments, follow the [CLI 0.163.0 migration](#upgrading-an-existing-stack-to-cli-01630)
+before changing the image tag.
 
 ### Mobile Connect pairing
 
@@ -273,7 +271,10 @@ other cookie-based authentication gateway authorize the manifest request.
 
 The [example](examples/docker-compose.yml) starts both `codex-cli` and
 `codex-web`, with Compose-managed networks and volumes. No existing network,
-volume, reverse proxy or MCP credentials are required:
+volume, reverse proxy or MCP credentials are required. If you already run the
+older stack, read the [migration steps](#upgrading-an-existing-stack-to-cli-01630)
+before deploying this example:
+
 
 ```sh
 docker compose -f examples/docker-compose.yml up -d
@@ -318,6 +319,41 @@ There is deliberately no authentication inside this image. Anyone who can
 reach the UI can operate the connected Codex instance with that instance's
 permissions. Keep the app-server private and place an authentication layer or
 VPN in front of the web UI before exposing it beyond a trusted network.
+
+### Upgrading an existing stack to CLI 0.163.0
+
+CLI 0.155.1 placed the socket directly at `/run/codex/app-server.sock`.
+CLI 0.163.0 leaves a symlink there and places the physical socket in
+`/tmp/codex-daemon-1000/`. Containers have separate `/tmp` directories;
+sharing only the old volume therefore exposes the link without its target.
+
+Update an existing Compose or Portainer stack as follows:
+
+1. Set the CLI image to `ghcr.io/icoretech/codex-docker:0.163.0`.
+2. Keep `codex_socket:/run/codex` in both services and add
+   `codex_daemon:/tmp/codex-daemon-1000` to **both** services.
+3. Add the top-level `codex_daemon` volume definition from the
+   [example Compose file](examples/docker-compose.yml). Both socket volumes
+   use tmpfs, UID/GID 1000 and mode `0700`; change the old `codex_socket`
+   option from `mode=0770` to `mode=0700`.
+4. Stop both services and remove their stopped containers so they release
+   the socket volume. Remove **only the old transient socket volume**
+   corresponding to `codex_socket`. Compose/Portainer normally prefixes its
+   actual name with the project/stack name; confirm its mount was `/run/codex`.
+   Editing the YAML alone does not update options on an existing named volume.
+5. Redeploy/recreate both services. Docker creates the socket volumes with
+   the new options. Keep `CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock`
+   and the existing `app-server --listen` command.
+
+The socket volumes hold temporary connection files only. Preserve the existing
+account, web-state and workspace volumes and their deployment-specific names.
+**Do not use `docker compose down -v`**, which would remove other stack volumes
+as well. Changing the CLI tag alone is insufficient for this migration.
+
+These paths assume both containers run as UID 1000. For a custom numeric UID,
+adjust the daemon path in both mounts and the ownership of both socket volumes.
+The protected directory must be mounted at the same absolute path in both
+containers so the symlink resolves.
 
 ## Docker Hub publishing
 
