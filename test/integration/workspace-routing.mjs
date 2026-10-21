@@ -58,7 +58,7 @@ test(
     });
     const proxy = childProcess(
       process.execPath,
-      ["docker/codex-app-server-proxy.mjs"],
+      ["docker/codex-app-server-proxy.mjs", "app-server"],
       {
         CODEX_APP_SERVER_URL: server.endpoint,
         CODEX_HOME: server.codexHome,
@@ -73,7 +73,19 @@ test(
       supportsOpenAIFormElicitation: false,
       supportsAttestationRequests: () => false,
     });
-    await rpc.call("initialize", init.params);
+    try {
+      await rpc.call("initialize", init.params);
+    } catch (error) {
+      // All credentials are synthetic and networking is isolated. Still redact
+      // the token if upstream ever includes it in a diagnostic during startup.
+      const details = `${proxy.log()}\n${server.log()}`.replaceAll(
+        accessToken,
+        "[redacted]",
+      );
+      throw new Error(`Routing fixture initialization failed: ${details}`, {
+        cause: error,
+      });
+    }
     rpc.notify("initialized");
     const account = await rpc.call("account/read", { refreshToken: false });
     const requirements = await rpc.call("configRequirements/read", {});
