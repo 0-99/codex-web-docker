@@ -13,6 +13,11 @@ import {
   openSelectWorkspaceRootDialog,
   type WorkspaceDirectoryEntries,
 } from "./workspace-root-dialog";
+import {
+  browserWindowFocus,
+  installBrowserWindowFocus,
+  withBrowserWindowFocus,
+} from "./window-focus";
 
 type IpcListener = (event: unknown, ...args: unknown[]) => void;
 
@@ -184,7 +189,12 @@ export function emitRendererEvent(channel: string, args: unknown[]): void {
 
 function handleIncomingMessage(message: MainToRendererMessage): void {
   if (message.type === "ipc-main-event") {
-    emitRendererEvent(message.channel, message.args);
+    emitRendererEvent(
+      message.channel,
+      message.channel === "codex_desktop:message-for-view"
+        ? message.args.map((value) => withBrowserWindowFocus(value, document))
+        : message.args,
+    );
     return;
   }
 
@@ -494,6 +504,16 @@ electronShim.onMemoryNavigationChanged = (navigation) => {
 export const ipcRenderer = {
   invoke(channel: string, ...args: unknown[]): Promise<unknown> {
     if (channel === "codex_desktop:message-from-view" && args.length === 1) {
+      if (
+        isRecord(args[0]) &&
+        args[0].type === "electron-window-focus-request"
+      ) {
+        // A hidden server-side BrowserWindow cannot describe this browser tab.
+        emitRendererEvent("codex_desktop:message-for-view", [
+          browserWindowFocus(document),
+        ]);
+        return Promise.resolve(undefined);
+      }
       if (isOpenInBrowserMessage(args[0])) {
         window.open(args[0].url, "_blank", "noopener,noreferrer");
       }
@@ -638,6 +658,10 @@ export const ipcRenderer = {
     return unimplemented("ipcRenderer.sendSync");
   },
 };
+
+installBrowserWindowFocus(window, document, (message) => {
+  emitRendererEvent("codex_desktop:message-for-view", [message]);
+});
 
 ensureSocket();
 

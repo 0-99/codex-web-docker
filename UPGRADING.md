@@ -267,3 +267,25 @@ thread-resume configuration fields and the remote-control enable/pairing
 requests. The offline real-CLI integration workflow supplements this schema
 check with persisted conversations and process restart recovery on both tested
 versions. Compatibility with other CLI versions is outside that test matrix.
+
+### Browser window focus
+
+The first-run logo animation waits for `electron-window-focus-changed` before
+advancing. The hidden server-side Electron windows do not represent browser tab
+focus: their creation order can leave an active tab reported as unfocused and
+keep onboarding on the logo indefinitely.
+
+The browser shim answers focus requests from `document.hasFocus()` and document
+visibility, forwards browser focus/blur/visibility changes to its own renderer,
+and replaces synthetic backend focus events with that tab's current state.
+Preserve this behavior when updating the preload or IPC bridge. Unit tests cover
+conflicting backend events, background tabs and independent tab listeners; the
+real Desktop integration completes onboarding during five fresh starts per CLI.
+Both the CLI and web backend receive the same test-only `CODEX_HOME`; a fresh
+Electron user-data directory alone does not isolate `.codex-global-state.json`.
+The test checks that onboarding has not been completed at each cold start.
+
+Desktop integration failures retain separate RPC, screenshot and HTML files for
+each cold start. Startup, onboarding and logo-animation inputs are observed by
+the test without changing their decisions. All diagnostics use isolated dummy
+accounts and a local model fixture.

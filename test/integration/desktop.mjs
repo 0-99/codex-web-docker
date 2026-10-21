@@ -74,6 +74,7 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
         {
           CODEX_APP_SERVER_URL: gateway.endpoint,
           CODEX_CLI_PATH: proxy,
+          CODEX_HOME: appServer.codexHome,
           CODEX_WEB_USER_DATA_DIR: path.join(appServer.directory, "web"),
           CODEX_WEB_BASE_PATH: "/ci/nested/",
           CODEX_WEB_DISABLE_INTERNAL_APP_MCP: "1",
@@ -198,8 +199,19 @@ for (let startupRun = 1; startupRun <= 5; startupRun++)
           "Desktop first-run screen or saved chat",
           45000,
         );
+        const readiness = await page.evaluate(() => ({
+          startup: window.__CODEX_CI_STARTUP__,
+          onboarding: window.__CODEX_CI_ONBOARDING__,
+          step: window.__CODEX_CI_ONBOARDING_STEP__,
+          splash: window.__CODEX_CI_SPLASH__,
+        }));
         console.log(
-          `Cold start ${startupRun} readiness: ${JSON.stringify(await page.evaluate(() => ({ startup: window.__CODEX_CI_STARTUP__, onboarding: window.__CODEX_CI_ONBOARDING__ })))}`,
+          `Cold start ${startupRun} readiness: ${JSON.stringify(readiness)}`,
+        );
+        assert.equal(
+          readiness.startup.projectlessOnboardingCompleted,
+          false,
+          "each cold start uses fresh Desktop onboarding state",
         );
         if (
           await page
