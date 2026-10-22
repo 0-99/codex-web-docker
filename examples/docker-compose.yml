@@ -80,6 +80,9 @@ services:
       CODEX_APP_SERVER_RETRY_DELAYS_MS: ${CODEX_APP_SERVER_RETRY_DELAYS_MS:-10000,10000,20000,30000}
       # 0 means keep waiting indefinitely, including during initial startup.
       CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS: ${CODEX_APP_SERVER_RETRY_MAX_ATTEMPTS:-0}
+      # Optional: verify legacy workspace routing when the CLI omits routing
+      # metadata. Disabled by default; account, route and policy checks still apply.
+      # CODEX_WEB_ALLOW_VERIFIED_LEGACY_ROUTING: "1"
       # Optional transport settings:
       # CODEX_APP_SERVER_MAX_PAYLOAD: "104857600"
       # CODEX_APP_SERVER_HANDSHAKE_TIMEOUT_MS: "10000"

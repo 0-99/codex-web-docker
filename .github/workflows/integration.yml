@@ -94,3 +94,41 @@ jobs:
           name: integration-${{ matrix.cli }}
           path: scratch/integration-results/
           if-no-files-found: ignore
+
+  workspace_routing:
+    name: Verify workspace routing with actual CLI 0.155.1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm rebuild sharp better-sqlite3
+      - run: npm run prepare
+      - run: node test/integration/prepare-container.mjs supported
+      # This authenticated-protocol regression is separate from the long browser
+      # cold-start suite so its real-image result remains directly reviewable.
+      - name: Exercise ChatGPT routing and turn in the isolated image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- ip link set lo up
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- \
+            runuser -u "$(id -un)" -- env "PATH=$PATH" \
+              "CODEX_TEST_CLI_PATH=$CODEX_TEST_CLI_PATH" \
+              "CODEX_TEST_IMAGE_REF=$CODEX_TEST_IMAGE_REF" \
+              "CODEX_TEST_NETWORK_CONTAINER=$CODEX_TEST_NETWORK_CONTAINER" \
+              "CODEX_TEST_CLI_SECURITY_OPTS=$CODEX_TEST_CLI_SECURITY_OPTS" \
+              CODEX_TEST_NETWORK_ISOLATED=1 \
+              "$(command -v node)" --test test/integration/workspace-routing.mjs
+      - name: Stop routing test runtime
+        if: always()
+        shell: bash
+        run: |
+          docker ps -aq --filter name=codex-ci-cli- | xargs -r docker rm --force
+          docker rm --force codex-ci-network-supported || true

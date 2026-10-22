@@ -49,3 +49,6 @@ patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-br
 patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-disable-internal-mcp.patch
 node ./scripts/enable_i18n.mjs scratch/asar/webview/assets
 rm -rf scratch/asar/node_modules/better-sqlite3
+
+# Allow explicit opt-in to verified legacy routing without bypassing policies.
+patch --batch --forward --strip 1 --directory scratch/asar < patches/app-host-verified-legacy-routing.patch

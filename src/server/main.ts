@@ -23,6 +23,7 @@ import {
   pathAtBase,
 } from "./base-path";
 import { installWebRuntime } from "./web-runtime";
+import { verifyLegacyWorkspaceRoute } from "./workspace-routing";
 import { normalizeLanguages, withBrowserLanguages } from "./electron/locale";
 
 export type ServerOptions = {
@@ -760,6 +761,9 @@ export async function startIpcBridgeServer(
 
   ensureElectronLikeProcessContext();
   installModuleAliasHook();
+  // The pinned Desktop patch passes its existing URL builder and policy-bound
+  // transport into this fork-owned verifier. No default endpoint is added here.
+  globalThis.__codexWebVerifyLegacyWorkspaceRoute = verifyLegacyWorkspaceRoute;
 
   const packageJson = JSON.parse(
     await fs.readFile(
