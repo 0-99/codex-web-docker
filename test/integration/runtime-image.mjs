@@ -135,8 +135,12 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
         if (!(await skip.isVisible())) break;
         await skip.click();
       }
-      await page.goto(`${base}thread/${threadId}`);
     }
+    // First-run onboarding can replace the deep link with its own memory route.
+    // Ask the real Desktop router to restore the seeded local thread afterward.
+    await page.evaluate((id) => window.dispatchEvent(new MessageEvent("message", {
+      data: { type: "navigate-to-route", path: `/local/${id}` },
+    })), threadId);
     await page.getByText("CI assistant response 1", { exact: true }).first().waitFor();
 
     // Navigate away, then select the saved chat through a real sidebar element.
