@@ -29,8 +29,8 @@ the saved chat through the real sidebar and displayed both new responses.
 The delayed new-chat action
 sent two `thread/start` requests, one persistent and one ephemeral. The CLI
 listed exactly one new persistent thread, and the backend PID did not change.
-That run failed only during cleanup of workspace files written by the image's
-UID 1000; the cleanup is being corrected. The exact `gh --version` caller, the
+The final CI run also cleaned up workspace files written by the image's UID
+1000 successfully. The exact `gh --version` caller, the
 `fs/readFile` call without `environmentId`, the `durable` host association,
 MCP timeout behavior, and optional HTTP 403 behavior still need dedicated
 investigation and regression coverage.
