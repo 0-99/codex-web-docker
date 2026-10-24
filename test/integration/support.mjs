@@ -399,18 +399,33 @@ export async function appServerFixture(t, { chatgptAuth } = {}) {
     serverProcess = childProcess(binary, ["app-server", "--listen", endpoint], {
       CODEX_HOME: codexHome,
     });
-    await until(async () => {
-      if (serverProcess.child.exitCode !== null)
-        throw new Error(serverProcess.log());
-      try {
+    let lastSocketError;
+    try {
+      await until(async () => {
+        if (serverProcess.child.exitCode !== null)
+          throw new Error(serverProcess.log());
         const socket = openSocket();
-        await once(socket, "open");
-        socket.close();
-        return true;
-      } catch {
-        return false;
-      }
-    }, "real app-server listener");
+        try {
+          await once(socket, "open");
+          socket.close();
+          return true;
+        } catch (error) {
+          lastSocketError = error;
+          socket.terminate();
+          return false;
+        }
+      }, "real app-server listener");
+    } catch (error) {
+      // A live process can still reject the WebSocket handshake. Record only
+      // transport diagnostics, never the CLI's potentially sensitive stderr.
+      const socketExists = inContainer
+        ? await fs.access(socketPath).then(() => true, () => false)
+        : undefined;
+      throw new Error(
+        `${error.message}; socketExists=${socketExists}; lastSocketError=${lastSocketError?.message ?? "none"}; exitCode=${serverProcess.child.exitCode}`,
+        { cause: error },
+      );
+    }
   }
   // Resolve the current process at shutdown: reconnect tests replace it through
   // stop()/start(), so capturing the initial process would leak its replacement.
