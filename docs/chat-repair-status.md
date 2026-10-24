@@ -10,8 +10,8 @@ Desktop bundle. A missing `gh` or `git` now produces a normal child exit with
 status 127 and an explanatory `command not found` stderr message for `spawn`
 and `execFile` callers. The pinned Desktop GitHub helper checks both the exit
 code and that phrase to classify the executable as missing. An installed tool
-keeps its original result. The IPC invoke bridge
-also converts a synchronous Desktop handler exception into an error reply.
+keeps its original result. The IPC invoke bridge also converts a synchronous
+Desktop handler exception into an error reply.
 Neither layer grants GitHub capability or fabricates a successful version.
 
 The local app-server relay records only selected RPC method names, `local`
@@ -24,16 +24,15 @@ unknown outcome and are not replayed.
 
 The pinned Desktop bundle could not be downloaded in this workspace because
 the configured HTTP proxy was unreachable. The Docker socket also denied
-access. GitHub Actions has a required job that builds the actual Web runtime
-image and runs saved and new browser chats against CLI 0.155.1. Its isolated
-test homes contain only synthetic credentials. The built-image CI run loaded
-the saved chat through the real sidebar and displayed both new responses.
-The delayed new-chat action
-sent two `thread/start` requests, one persistent and one ephemeral. The CLI
-listed exactly one new persistent thread, and the backend PID did not change.
-1000 successfully. Bundle inspection found the GitHub helper's
-`appServerClient.spawn` path and its missing-command classification. The exact
-`gh --version` caller, the
+access. GitHub Actions builds the actual Web runtime image and exercises saved
+and new browser chats against CLI 0.155.1 with isolated synthetic test homes.
+The test selects the saved chat through the sidebar, checks visible responses,
+counts persistent threads, and verifies backend PID continuity. A delayed
+new-chat action was observed to issue one persistent and one ephemeral
+`thread/start`; the CLI listed one additional persistent thread.
+
+Bundle inspection found the GitHub helper's `appServerClient.spawn` path and
+its missing-command classification. The exact `gh --version` caller, the
 `fs/readFile` call without `environmentId`, the `durable` host association,
 MCP timeout behavior, and optional HTTP 403 behavior still need dedicated
 investigation and regression coverage.

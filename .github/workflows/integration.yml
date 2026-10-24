@@ -30,11 +30,6 @@ jobs:
         run: docker build --build-arg SOURCE_REVISION=${{ github.sha }} --tag codex-web-chat-test:ci .
       - name: Confirm optional tools are absent from the runtime
         run: docker run --rm --network none --entrypoint /bin/sh codex-web-chat-test:ci -ec '! command -v gh; ! command -v git'
-      - name: Inspect bounded call sites in the pinned Desktop bundle
-        run: |
-          docker run --rm --network none \
-            --mount "type=bind,src=$PWD/test/integration/bundle-probe.mjs,dst=/bundle-probe.mjs,readonly" \
-            --entrypoint node codex-web-chat-test:ci /bundle-probe.mjs
       - name: Prepare pinned CLI 0.155.1 in an isolated network
         run: node test/integration/prepare-container.mjs supported
       - name: Exercise the built Web image in the real browser

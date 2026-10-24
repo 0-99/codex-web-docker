@@ -184,6 +184,8 @@ function traceCompletion(request, state, errorCode = null) {
     // optional, content-free diagnostics to a dedicated file instead.
     appendFileSync(traceFile, `rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${errorCode}\n`);
   } catch {
+    // The trace is diagnostic only; a full or unwritable file must not break
+    // the app-server connection.
     traceFile = null;
   }
 }

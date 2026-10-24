@@ -159,6 +159,8 @@ export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
               };
         client.send(JSON.stringify({ id: message.id, result }));
       } else {
+        // Delay forwarding selected requests to the real CLI. This exercises
+        // the browser's pending state without fabricating RPC responses.
         const forward = () => {
           if (remote.readyState === WebSocket.OPEN) remote.send(data);
           else queued.push(data);
