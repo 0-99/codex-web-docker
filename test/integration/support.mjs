@@ -42,7 +42,10 @@ export function fixtureCleanup(t) {
       }
     }
     if (errors.length)
-      throw new AggregateError(errors, "Integration fixture cleanup failed");
+      throw new AggregateError(
+        errors,
+        `Integration fixture cleanup failed: ${errors.map((error) => error.message).join("; ")}`,
+      );
   });
   return (dispose) => disposers.push(dispose);
 }

@@ -79,7 +79,16 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
   // The Web image has its own synthetic home. It sees the shared workspace and
   // the local RPC gateway socket, never the CLI's home or authentication file.
   const webHome = await fs.mkdtemp(path.join(os.tmpdir(), "codex-web-runtime-"));
-  server.cleanup(() => fs.rm(webHome, { recursive: true, force: true }));
+  server.cleanup(async () => {
+    // The image's UID 1000 can create private subdirectories that the runner
+    // UID cannot traverse. Restore permissions inside an isolated root helper.
+    docker([
+      "run", "--rm", "--pull=never", "--network", "none", "--user", "0",
+      "--mount", `type=bind,src=${webHome},dst=/cleanup`,
+      "--entrypoint", "/bin/sh", image, "-ec", "chmod -R 777 /cleanup",
+    ]);
+    await fs.rm(webHome, { recursive: true, force: true });
+  });
   await fs.chmod(webHome, 0o777);
   await fs.writeFile(
     path.join(webHome, "auth.json"),

@@ -22,13 +22,15 @@ unknown outcome and are not replayed.
 
 The pinned Desktop bundle could not be downloaded in this workspace because
 the configured HTTP proxy was unreachable. The Docker socket also denied
-access. GitHub Actions now has a required job that builds the actual Web
-runtime image and runs saved and new browser chats against CLI 0.155.1, but
-that job has not yet run. Its isolated test homes contain only synthetic
-credentials. Consequently the exact `gh --version` caller, the `fs/readFile`
-call without `environmentId`, the `durable` host association, the four HTTP
-403 responses, and the full browser transition after `thread/start` or
-`thread/read` remain under investigation. The first built-image CI run loaded
-the saved chat and displayed both new responses, but the delayed new-chat
-action sent two `thread/start` requests. MCP timeout and optional HTTP 403
-behavior still need dedicated regression coverage.
+access. GitHub Actions has a required job that builds the actual Web runtime
+image and runs saved and new browser chats against CLI 0.155.1. Its isolated
+test homes contain only synthetic credentials. The built-image CI run loaded
+the saved chat through the real sidebar and displayed both new responses.
+The delayed new-chat action
+sent two `thread/start` requests, one persistent and one ephemeral. The CLI
+listed exactly one new persistent thread, and the backend PID did not change.
+That run failed only during cleanup of files written by the image's UID 1000;
+the cleanup is being corrected. The exact `gh --version` caller, the
+`fs/readFile` call without `environmentId`, the `durable` host association,
+MCP timeout behavior, and optional HTTP 403 behavior still need dedicated
+investigation and regression coverage.
