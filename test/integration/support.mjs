@@ -120,7 +120,7 @@ export function rpcSocket(socket) {
 
 // Remote-control enrollment belongs to the authenticated cloud service. Stub
 // only those two requests; all normal Desktop RPC reaches the real CLI.
-export async function pairingGateway(t, appServer) {
+export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cw-pair-"));
   const socketPath = path.join(directory, "rpc.sock");
   const server = http.createServer((_, reply) => reply.writeHead(404).end());
@@ -155,8 +155,15 @@ export async function pairingGateway(t, appServer) {
                 expiresAt: Math.floor(Date.now() / 1000) + 300,
               };
         client.send(JSON.stringify({ id: message.id, result }));
-      } else if (remote.readyState === WebSocket.OPEN) remote.send(data);
-      else queued.push(data);
+      } else {
+        const forward = () => {
+          if (remote.readyState === WebSocket.OPEN) remote.send(data);
+          else queued.push(data);
+        };
+        const wait = delayMethods[message.method] ?? 0;
+        if (wait > 0) setTimeout(forward, wait);
+        else forward();
+      }
     });
     remote.on("message", (data) => {
       traffic.push({
@@ -180,7 +187,7 @@ export async function pairingGateway(t, appServer) {
   });
   server.listen(socketPath);
   await once(server, "listening");
-  return { endpoint: `unix://${socketPath}`, requests, traffic };
+  return { endpoint: `unix://${socketPath}`, directory, socketPath, requests, traffic };
 }
 
 async function modelServer() {

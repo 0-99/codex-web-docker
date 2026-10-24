@@ -91,6 +91,10 @@ const failureAction = configuredChoice(
 const status = createStatusReporter();
 const pendingMessages = [];
 const inFlight = new Map();
+const requestTimes = new Map();
+const tracedMethods = new Set([
+  "thread/start", "thread/read", "thread/resume", "thread/list", "turn/start",
+]);
 const serverRequests = new Set();
 const threads = new Map();
 const resumeErrors = new Map();
@@ -164,7 +168,15 @@ function isRequest(message) {
   );
 }
 function errorResponse(request, message, code = -32001) {
+  traceCompletion(request, "error", code);
   if (isRequest(request)) output({ id: request.id, error: { code, message } });
+}
+function traceCompletion(request, state, errorCode = null) {
+  if (!isRequest(request)) return;
+  const timing = requestTimes.get(request.id);
+  if (!timing) return;
+  requestTimes.delete(request.id);
+  log(`rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${errorCode}`);
 }
 function formatDuration(ms) {
   if (ms % 60_000 === 0)
@@ -257,6 +269,7 @@ function trackResponse(message) {
   )
     return;
   inFlight.delete(message.id);
+  traceCompletion(request, message.error ? "error" : "completed", message.error?.code ?? null);
   if (message.error) return;
   if (
     request.method === "turn/start" &&
@@ -285,7 +298,7 @@ function trackResponse(message) {
     });
   }
 }
-function forward({ raw, parsed }) {
+function forward({ raw, parsed, queuedAt }) {
   // Server-initiated request IDs belong to this connection only. In particular,
   // do not deliver an old approval response to a restarted server.
   if (parsed && !parsed.method && Object.hasOwn(parsed, "id")) {
@@ -310,13 +323,26 @@ function forward({ raw, parsed }) {
     );
     return;
   }
-  if (isRequest(parsed)) inFlight.set(parsed.id, parsed);
+  if (isRequest(parsed)) {
+    inFlight.set(parsed.id, parsed);
+    if (tracedMethods.has(parsed.method)) {
+      const timing = requestTimes.get(parsed.id);
+      if (timing) timing.waitMs = queuedAt ? Date.now() - queuedAt : 0;
+    }
+  }
   socket.send(raw);
 }
 function receiveInput(raw) {
   const original = parse(raw);
   const parsed = withoutDesktopAppMcp(original);
   if (parsed !== original) raw = JSON.stringify(parsed);
+  if (isRequest(parsed) && tracedMethods.has(parsed.method)) {
+    requestTimes.set(parsed.id, {
+      method: parsed.method,
+      startedAt: Date.now(),
+      waitMs: 0,
+    });
+  }
   if (parsed?.method === "initialize" && isRequest(parsed)) {
     initializeRequest = { id: parsed.id, raw };
     startInitialize?.();
@@ -333,7 +359,7 @@ function receiveInput(raw) {
   } else if (parsed && !parsed.method) {
     return; // Stale server responses cannot be queued across connections.
   } else if (pendingMessages.length < 1000) {
-    pendingMessages.push({ raw, parsed });
+    pendingMessages.push({ raw, parsed, queuedAt: Date.now() });
   } else {
     errorResponse(
       parsed,
