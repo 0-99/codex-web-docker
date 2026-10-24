@@ -42,7 +42,10 @@ export function fixtureCleanup(t) {
       }
     }
     if (errors.length)
-      throw new AggregateError(errors, "Integration fixture cleanup failed");
+      throw new AggregateError(
+        errors,
+        `Integration fixture cleanup failed: ${errors.map((error) => error.message).join("; ")}`,
+      );
   });
   return (dispose) => disposers.push(dispose);
 }
@@ -120,7 +123,7 @@ export function rpcSocket(socket) {
 
 // Remote-control enrollment belongs to the authenticated cloud service. Stub
 // only those two requests; all normal Desktop RPC reaches the real CLI.
-export async function pairingGateway(t, appServer) {
+export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "cw-pair-"));
   const socketPath = path.join(directory, "rpc.sock");
   const server = http.createServer((_, reply) => reply.writeHead(404).end());
@@ -141,7 +144,7 @@ export async function pairingGateway(t, appServer) {
     client.on("message", (raw) => {
       const data = String(raw);
       const message = JSON.parse(data);
-      traffic.push({ direction: "request", message });
+      traffic.push({ at: Date.now(), direction: "request", message });
       if (
         message.method === "remoteControl/enable" ||
         message.method === "remoteControl/pairing/start"
@@ -155,11 +158,21 @@ export async function pairingGateway(t, appServer) {
                 expiresAt: Math.floor(Date.now() / 1000) + 300,
               };
         client.send(JSON.stringify({ id: message.id, result }));
-      } else if (remote.readyState === WebSocket.OPEN) remote.send(data);
-      else queued.push(data);
+      } else {
+        // Delay forwarding selected requests to the real CLI. This exercises
+        // the browser's pending state without fabricating RPC responses.
+        const forward = () => {
+          if (remote.readyState === WebSocket.OPEN) remote.send(data);
+          else queued.push(data);
+        };
+        const wait = delayMethods[message.method] ?? 0;
+        if (wait > 0) setTimeout(forward, wait);
+        else forward();
+      }
     });
     remote.on("message", (data) => {
       traffic.push({
+        at: Date.now(),
         direction: "response",
         message: JSON.parse(String(data)),
       });
@@ -180,7 +193,7 @@ export async function pairingGateway(t, appServer) {
   });
   server.listen(socketPath);
   await once(server, "listening");
-  return { endpoint: `unix://${socketPath}`, requests, traffic };
+  return { endpoint: `unix://${socketPath}`, directory, socketPath, requests, traffic };
 }
 
 async function modelServer() {
@@ -386,18 +399,33 @@ export async function appServerFixture(t, { chatgptAuth } = {}) {
     serverProcess = childProcess(binary, ["app-server", "--listen", endpoint], {
       CODEX_HOME: codexHome,
     });
-    await until(async () => {
-      if (serverProcess.child.exitCode !== null)
-        throw new Error(serverProcess.log());
-      try {
+    let lastSocketError;
+    try {
+      await until(async () => {
+        if (serverProcess.child.exitCode !== null)
+          throw new Error(serverProcess.log());
         const socket = openSocket();
-        await once(socket, "open");
-        socket.close();
-        return true;
-      } catch {
-        return false;
-      }
-    }, "real app-server listener");
+        try {
+          await once(socket, "open");
+          socket.close();
+          return true;
+        } catch (error) {
+          lastSocketError = error;
+          socket.terminate();
+          return false;
+        }
+      }, "real app-server listener");
+    } catch (error) {
+      // A live process can still reject the WebSocket handshake. Record only
+      // transport diagnostics, never the CLI's potentially sensitive stderr.
+      const socketExists = inContainer
+        ? await fs.access(socketPath).then(() => true, () => false)
+        : undefined;
+      throw new Error(
+        `${error.message}; socketExists=${socketExists}; lastSocketError=${lastSocketError?.message ?? "none"}; exitCode=${serverProcess.child.exitCode}`,
+        { cause: error },
+      );
+    }
   }
   // Resolve the current process at shutdown: reconnect tests replace it through
   // stop()/start(), so capturing the initial process would leak its replacement.

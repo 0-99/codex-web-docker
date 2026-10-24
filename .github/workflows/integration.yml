@@ -12,6 +12,48 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  runtime_image_chat:
+    name: Built Web image with CLI 0.155.1 and browser chats
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npx playwright install --with-deps chromium
+      - name: Build the actual Web runtime image
+        run: docker build --build-arg SOURCE_REVISION=${{ github.sha }} --tag codex-web-chat-test:ci .
+      - name: Confirm optional tools are absent from the runtime
+        run: docker run --rm --network none --entrypoint /bin/sh codex-web-chat-test:ci -ec '! command -v gh; ! command -v git'
+      - name: Prepare pinned CLI 0.155.1 in an isolated network
+        run: node test/integration/prepare-container.mjs supported
+      - name: Exercise the built Web image in the real browser
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- ip link set lo up
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- \
+            runuser -u "$(id -un)" -- env "PATH=$PATH" \
+              "CODEX_TEST_CLI_PATH=$CODEX_TEST_CLI_PATH" \
+              "CODEX_TEST_IMAGE_REF=$CODEX_TEST_IMAGE_REF" \
+              "CODEX_TEST_NETWORK_CONTAINER=$CODEX_TEST_NETWORK_CONTAINER" \
+              "CODEX_TEST_CLI_SECURITY_OPTS=$CODEX_TEST_CLI_SECURITY_OPTS" \
+              CODEX_TEST_WEB_IMAGE_REF=codex-web-chat-test:ci \
+              CODEX_TEST_NETWORK_ISOLATED=1 \
+              "$(command -v node)" --test test/integration/runtime-image.mjs
+      - name: Stop isolated test containers
+        if: always()
+        shell: bash
+        run: |
+          docker ps -aq --filter name=codex-ci-web- | xargs -r docker rm --force
+          docker ps -aq --filter name=codex-ci-cli- | xargs -r docker rm --force
+          docker rm --force codex-ci-network-supported || true
+
   integration:
     name: Real Desktop with ${{ matrix.cli }} CLI
     runs-on: ubuntu-latest

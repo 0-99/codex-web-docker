@@ -715,14 +715,17 @@ export async function startIpcBridgeServer(
 
         if (message.type === "ipc-renderer-invoke") {
           const { channel, requestId, args } = message;
-          Promise.resolve(
-            bridgeState.handleRendererInvoke?.(channel, args, window.id) ??
-              Promise.reject(
-                new Error(
+          // Enter the promise chain before invoking Desktop so synchronous
+          // handler throws reach the same IPC error reply as rejections.
+          Promise.resolve()
+            .then(() => {
+              if (!bridgeState.handleRendererInvoke) {
+                throw new Error(
                   `[ipc-bridge] no ipcMain.handle for channel ${channel}`,
-                ),
-              ),
-          )
+                );
+              }
+              return bridgeState.handleRendererInvoke(channel, args, window.id);
+            })
             .then((result) => {
               const payload: MainToRendererMessage = {
                 type: "ipc-renderer-invoke-result",
