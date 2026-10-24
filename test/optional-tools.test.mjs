@@ -26,7 +26,12 @@ test("missing gh and git exit unsuccessfully without a spawn error", async (t) =
     const response = await result(child);
     assert.equal(errors, 0);
     assert.equal(response.code, 127);
-    assert.match(response.stderr, new RegExp(`${command} is unavailable`));
+    assert.match(response.stderr, new RegExp(`${command}: command not found`));
+    if (command === "gh") {
+      assert.match(response.stderr,
+        /(?:^|\b)gh(?::|\b).*(?:command not found|not found)/i,
+        "the pinned Desktop GitHub helper must classify the command as missing");
+    }
   }
 });
 
@@ -51,7 +56,7 @@ test("execFile reports a missing optional command through its callback", async (
   });
   assert.equal(outcome.error.code, 127);
   assert.equal(outcome.stdout, "");
-  assert.match(outcome.stderr, /gh is unavailable/);
+  assert.match(outcome.stderr, /gh: command not found/);
 });
 
 test("promisified execFile keeps Node's stdout and stderr contract", async (t) => {
@@ -59,6 +64,6 @@ test("promisified execFile keeps Node's stdout and stderr contract", async (t) =
   t.after(() => fs.rm(directory, { recursive: true, force: true }));
   await assert.rejects(
     promisify(execFileWithOptionalTools)("gh", ["--version"], { env: { PATH: directory } }),
-    (error) => error.code === 127 && /gh is unavailable/.test(error.stderr),
+    (error) => error.code === 127 && /gh: command not found/.test(error.stderr),
   );
 });

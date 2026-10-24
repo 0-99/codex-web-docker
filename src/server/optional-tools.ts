@@ -4,7 +4,9 @@ import path from "node:path";
 import { promisify } from "node:util";
 
 const optionalTools = new Set(["gh", "git"]);
-const unavailableScript = 'echo "$1 is unavailable in the Codex Web runtime" >&2; exit 127';
+// Desktop's GitHub helper recognizes exit 127 as a missing executable only
+// when stderr also contains "gh: ... not found".
+const unavailableScript = 'echo "$1: command not found (unavailable in the Codex Web runtime)" >&2; exit 127';
 
 function executableOnPath(command: string, searchPath: string): boolean {
   for (const directory of searchPath.split(path.delimiter)) {
