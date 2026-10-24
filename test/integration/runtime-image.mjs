@@ -85,7 +85,8 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     docker([
       "run", "--rm", "--pull=never", "--network", "none", "--user", "0",
       "--mount", `type=bind,src=${webHome},dst=/cleanup`,
-      "--entrypoint", "/bin/sh", image, "-ec", "chmod -R 777 /cleanup",
+      "--mount", `type=bind,src=${server.workspace},dst=/workspace-cleanup`,
+      "--entrypoint", "/bin/sh", image, "-ec", "chmod -R 777 /cleanup /workspace-cleanup",
     ]);
     await fs.rm(webHome, { recursive: true, force: true });
   });
