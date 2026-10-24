@@ -3,6 +3,7 @@
 import process from "node:process";
 import readline from "node:readline";
 import net from "node:net";
+import { appendFileSync } from "node:fs";
 import { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { integerSetting, retryPolicy } from "./retry-policy.mjs";
@@ -92,6 +93,7 @@ const status = createStatusReporter();
 const pendingMessages = [];
 const inFlight = new Map();
 const requestTimes = new Map();
+let traceFile = process.env.CODEX_WEB_RPC_TRACE_FILE || null;
 const tracedMethods = new Set([
   "thread/start", "thread/read", "thread/resume", "thread/list", "turn/start",
 ]);
@@ -176,7 +178,14 @@ function traceCompletion(request, state, errorCode = null) {
   const timing = requestTimes.get(request.id);
   if (!timing) return;
   requestTimes.delete(request.id);
-  log(`rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${errorCode}`);
+  if (!traceFile) return;
+  try {
+    // Desktop treats every proxy stderr line as a connection error. Write
+    // optional, content-free diagnostics to a dedicated file instead.
+    appendFileSync(traceFile, `rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${errorCode}\n`);
+  } catch {
+    traceFile = null;
+  }
 }
 function formatDuration(ms) {
   if (ms % 60_000 === 0)

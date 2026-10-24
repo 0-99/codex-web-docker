@@ -141,7 +141,7 @@ export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
     client.on("message", (raw) => {
       const data = String(raw);
       const message = JSON.parse(data);
-      traffic.push({ direction: "request", message });
+      traffic.push({ at: Date.now(), direction: "request", message });
       if (
         message.method === "remoteControl/enable" ||
         message.method === "remoteControl/pairing/start"
@@ -167,6 +167,7 @@ export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
     });
     remote.on("message", (data) => {
       traffic.push({
+        at: Date.now(),
         direction: "response",
         message: JSON.parse(String(data)),
       });

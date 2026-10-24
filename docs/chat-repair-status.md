@@ -14,7 +14,9 @@ Neither layer grants GitHub capability or fabricates a successful version.
 
 The local app-server relay records only selected RPC method names, `local`
 host, transport, queue wait, elapsed time, completion state and numeric error
-code. It records neither RPC parameters nor response bodies. Its in-flight
+code when `CODEX_WEB_RPC_TRACE_FILE` names a writable file. Desktop treats
+proxy stderr as a connection error, so routine RPC traces must not use stderr.
+The trace records neither RPC parameters nor response bodies. Its in-flight
 requests remain single-use across reconnects; failed requests report an
 unknown outcome and are not replayed.
 
@@ -25,6 +27,8 @@ runtime image and runs saved and new browser chats against CLI 0.155.1, but
 that job has not yet run. Its isolated test homes contain only synthetic
 credentials. Consequently the exact `gh --version` caller, the `fs/readFile`
 call without `environmentId`, the `durable` host association, the four HTTP
-403 responses, and the real browser transition after `thread/start` or
-`thread/read` remain unverified until CI results are available. MCP timeout
-and optional HTTP 403 behavior still need dedicated regression coverage.
+403 responses, and the full browser transition after `thread/start` or
+`thread/read` remain under investigation. The first built-image CI run loaded
+the saved chat and displayed both new responses, but the delayed new-chat
+action sent two `thread/start` requests. MCP timeout and optional HTTP 403
+behavior still need dedicated regression coverage.
