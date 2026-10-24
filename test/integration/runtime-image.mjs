@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { once } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -34,6 +33,12 @@ function rpcCount(gateway, method) {
   return gateway.traffic.filter(
     ({ direction, message }) => direction === "request" && message.method === method,
   ).length;
+}
+
+function listedThreadIds(listing) {
+  const rows = listing.data ?? listing.threads;
+  assert.ok(Array.isArray(rows), `Unexpected thread/list shape: ${Object.keys(listing).join(",")}`);
+  return new Set(rows.map((thread) => thread.id));
 }
 
 test("built Web runtime opens a saved chat and creates exactly one new chat", { timeout: 240_000 }, async (t) => {
@@ -69,8 +74,7 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     () => seed.messages.some((message) => message.method === "turn/completed" && message.params.turn.id === firstTurn.turn.id),
     "seeded turn completion",
   );
-  seedSocket.close();
-  await once(seedSocket, "close");
+  const initialThreads = listedThreadIds(await seed.call("thread/list", {}));
 
   // The Web image has its own synthetic home. It sees the shared workspace and
   // the local RPC gateway socket, never the CLI's home or authentication file.
@@ -123,6 +127,7 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
   page.on("pageerror", (error) => pageErrors.push(error.name));
   let startsBeforeNewClick = null;
   let startsAfterNewClick = null;
+  let persistedAfterCount = null;
   try {
     await page.goto(`${base}thread/${threadId}`);
     await until(async () =>
@@ -163,10 +168,24 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     await composer.fill("Start one new CI conversation.");
     await page.getByRole("button", { name: "Send", exact: true }).click();
     await page.getByText("CI assistant response 3", { exact: true }).first().waitFor();
-    assert.equal(rpcCount(gateway, "thread/start") - startsBeforeNewClick, 1);
+    let finalThreads;
+    await until(async () => {
+      finalThreads = listedThreadIds(await seed.call("thread/list", {}));
+      persistedAfterCount = finalThreads.size;
+      return [...finalThreads].some((id) => !initialThreads.has(id));
+    }, "new persistent thread", 15_000);
+    assert.equal([...finalThreads].filter((id) => !initialThreads.has(id)).length, 1,
+      "one new persistent thread appears in the CLI's thread list");
     assert.equal(server.model.requests.length, 3);
     assert.equal(containerState(name).Pid, initialPid, "the same Web backend process survives both chats");
     assert.deepEqual(pageErrors, []);
+    console.log(JSON.stringify({
+      persistentThreadsAdded: [...finalThreads].filter((id) => !initialThreads.has(id)).length,
+      threadStartEphemeral: gateway.traffic
+        .filter(({ direction, message }) => direction === "request" && message.method === "thread/start")
+        .map(({ message }) => message.params?.ephemeral ?? null),
+      backendPidUnchanged: true,
+    }));
   } catch (error) {
     const methods = gateway.traffic
       .filter(({ direction }) => direction === "request")
@@ -176,10 +195,13 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
       .map(({ at, message }) => ({
         at,
         keys: Object.keys(message.params ?? {}).sort(),
+        ephemeral: message.params?.ephemeral,
+        historyMode: message.params?.historyMode,
+        threadSourceType: typeof message.params?.threadSource,
         parametersHash: createHash("sha256").update(JSON.stringify(message.params ?? {})).digest("hex").slice(0, 12),
       }));
     throw new Error(
-      `${error.message}\nWeb state: ${JSON.stringify(containerState(name))}\nRPC methods: ${JSON.stringify(methods)}\nThread starts: ${JSON.stringify(starts)}\nStarts before/after New click: ${startsBeforeNewClick}/${startsAfterNewClick}\nRPC trace: ${JSON.stringify(safeRpcTrace(name))}\nWeb diagnostics: ${JSON.stringify(safeWebDiagnostics(name))}\nBrowser error types: ${JSON.stringify(pageErrors)}`,
+      `${error.message}\nWeb state: ${JSON.stringify(containerState(name))}\nRPC methods: ${JSON.stringify(methods)}\nThread starts: ${JSON.stringify(starts)}\nStarts before/after New click: ${startsBeforeNewClick}/${startsAfterNewClick}\nPersisted thread counts before/after: ${initialThreads.size}/${persistedAfterCount}\nRPC trace: ${JSON.stringify(safeRpcTrace(name))}\nWeb diagnostics: ${JSON.stringify(safeWebDiagnostics(name))}\nBrowser error types: ${JSON.stringify(pageErrors)}`,
       { cause: error },
     );
   }
