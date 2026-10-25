@@ -100,10 +100,23 @@ test(
     const ready = await waitFor(f.snapshot, "ready");
     assert.ok(ready.history.some((item) => item.phase === "resuming"));
     reporter.close();
-    await waitFor(f.snapshot, "failed");
+    assert.equal((await waitFor(f.snapshot, "failed")).failureKind, "relay-disconnected");
     await reader.cancel();
   },
 );
+
+test("retry exhaustion is distinct from a disconnected relay and cannot expose arbitrary details", async (t) => {
+  const f = await start(t);
+  const reporter = createStatusReporter();
+  t.after(() => reporter.close());
+  reporter.update("failed", { failureKind: "retry-exhausted", errorMessage: "secret" });
+  const failed = await waitFor(f.snapshot, "failed");
+  assert.equal(failed.failureKind, "retry-exhausted");
+  assert.equal(failed.errorMessage, undefined);
+  reporter.close();
+  await delay(30);
+  assert.equal((await f.snapshot()).failureKind, "retry-exhausted");
+});
 
 test(
   "status streams do not prevent graceful backend shutdown",

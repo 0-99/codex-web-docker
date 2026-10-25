@@ -51,6 +51,10 @@
       degraded:
         "App-Server verbunden · ein Thread konnte nicht wiederhergestellt werden",
       failed: "Verbindung beendet · bitte Serverprotokoll prüfen",
+      failureKinds: {
+        "retry-exhausted": "App-Server nach mehreren Versuchen nicht erreichbar",
+        "relay-disconnected": "App-Server-Relay beendet · bitte Serverprotokoll prüfen",
+      },
       backend:
         "Verbindung zum Web-Backend unterbrochen · wir verbinden erneut …",
       loading: "App-Server verbunden · Oberfläche wird geladen …",
@@ -77,6 +81,10 @@
       ready: "Ready",
       degraded: "App-server connected · a thread could not be restored",
       failed: "Connection stopped · please check the server log",
+      failureKinds: {
+        "retry-exhausted": "App-server unavailable after repeated attempts",
+        "relay-disconnected": "App-server relay stopped · please check the server log",
+      },
       backend: "Web backend disconnected · reconnecting …",
       loading: "App-server connected · loading interface …",
       "rpc-waiting": "Chat request is still running …",
@@ -113,6 +121,8 @@
       ? text.backend
       : state.phase === "ready" && starting
         ? text.loading
+        : state.phase === "failed" && text.failureKinds[state.failureKind]
+          ? text.failureKinds[state.failureKind]
         : state.phase === "rpc-waiting"
           ? text.rpcActions[state.rpcMethod] || text["rpc-waiting"]
         : text[state.phase];

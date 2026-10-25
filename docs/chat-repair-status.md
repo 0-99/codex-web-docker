@@ -31,6 +31,11 @@ an MCP server times out. The built-image browser test delays `thread/start` for
 25 seconds and configures a synthetic MCP server whose handshake exceeds its
 startup deadline.
 
+The status panel distinguishes a relay that vanished from a relay that stopped
+after its configured reconnect limit. The default retry policy has no limit;
+the older generic "connection stopped" label alone did not establish which
+event happened on the affected machine.
+
 The pinned Desktop bundle could not be downloaded in this workspace because
 the configured HTTP proxy was unreachable. The Docker socket also denied
 access. GitHub Actions builds the actual Web runtime image and exercises saved

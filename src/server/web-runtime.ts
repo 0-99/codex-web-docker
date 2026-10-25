@@ -18,6 +18,7 @@ type Status = {
   failedThreads?: number;
   rpcMethod?: string;
   errorCode?: number | null;
+  failureKind?: "retry-exhausted" | "relay-disconnected";
 };
 const phases = new Set([
   "connecting",
@@ -195,6 +196,9 @@ export async function installWebRuntime(
               next.rpcMethod = value.rpcMethod;
             if (Number.isSafeInteger(value.errorCode))
               next.errorCode = value.errorCode;
+            if (value.phase === "failed" &&
+              (value.failureKind === "retry-exhausted" || value.failureKind === "relay-disconnected"))
+              next.failureKind = value.failureKind;
             connections.set(socket, next);
             // If multiple managed proxies exist, never hide one still waiting.
             const waiting = [...connections.values()].find(
@@ -213,10 +217,13 @@ export async function installWebRuntime(
         if (last)
           publish(
             [...connections.values()].find((item) => item.phase !== "ready") ??
-              [...connections.values()].at(-1) ?? {
+              [...connections.values()].at(-1) ?? (last.phase === "failed" ? last : {
                 phase: "failed",
+                // A closed side channel says only that its relay disappeared;
+                // it does not establish that the CLI exhausted retries.
+                failureKind: "relay-disconnected",
                 updatedAt: Date.now(),
-              },
+              }),
           );
       });
     });

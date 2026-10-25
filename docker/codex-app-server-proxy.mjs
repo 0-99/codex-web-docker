@@ -265,7 +265,7 @@ function scheduleReconnect(error) {
   log(`app-server connection failed: ${error.message}`);
   const next = policy.next(++retryAttempt);
   if (!next) {
-    status.update("failed");
+    status.update("failed", { failureKind: "retry-exhausted" });
     log(`giving up ${policy.exhausted}`);
     for (const { parsed } of pendingMessages.splice(0))
       errorResponse(parsed, "App-server reconnect attempts exhausted.");
