@@ -5,5 +5,9 @@
   },
   "candidate": {
     "image": "ghcr.io/icoretech/codex-docker:latest"
+  },
+  "supported-current": {
+    "image": "ghcr.io/icoretech/codex-docker:0.164.0",
+    "expectedCliVersion": "0.164.0"
   }
 }

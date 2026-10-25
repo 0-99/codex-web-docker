@@ -37,6 +37,10 @@ const child = spawn(
     `${process.getuid()}:${process.getgid()}`,
     "--volume",
     `${root}:${root}`,
+    // Current CLI releases place the physical socket here and publish an absolute
+    // symlink in the fixture directory. Share both paths with the test host.
+    "--volume",
+    `/tmp/codex-daemon-${process.getuid()}:/tmp/codex-daemon-${process.getuid()}`,
     "--workdir",
     process.cwd(),
     "--env",

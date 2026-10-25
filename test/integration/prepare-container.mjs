@@ -7,11 +7,17 @@ const selected = process.argv[2];
 const config = JSON.parse(
   await fs.readFile(new URL("./images.json", import.meta.url), "utf8"),
 );
-assert.ok(selected === "supported" || selected === "candidate");
+const requiredContainer =
+  selected === "supported" || selected === "supported-current";
+assert.ok(requiredContainer || selected === "candidate");
 const { image, expectedCliVersion } = config[selected];
 function docker(args) {
   return execFileSync("docker", args, {
     encoding: "utf8",
+    env: {
+      ...process.env,
+      ...(requiredContainer ? { CODEX_CLI_VERSION: expectedCliVersion } : {}),
+    },
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
 }
@@ -26,11 +32,11 @@ const compose = JSON.parse(
   ]),
 );
 const cli = compose.services["codex-cli"];
-if (selected === "supported") {
+if (requiredContainer) {
   assert.equal(
     cli.image,
     image,
-    "Example Compose must use the supported image from images.json",
+    "Example Compose must select the requested supported image from images.json",
   );
 }
 assert.deepEqual(cli.command, [
@@ -38,6 +44,23 @@ assert.deepEqual(cli.command, [
   "--listen",
   "unix:///run/codex/app-server.sock",
 ]);
+// Validate the actual example mounts before using them in the cross-container probe.
+for (const service of [cli, compose.services["codex-web"]]) {
+  for (const [source, target] of [
+    ["codex_socket", "/run/codex"],
+    ["codex_daemon", "/tmp/codex-daemon-1000"],
+  ]) {
+    assert.ok(
+      service.volumes.some(
+        (mount) =>
+          mount.type === "volume" &&
+          mount.source === source &&
+          mount.target === target,
+      ),
+      `Both services must share ${source} at ${target}`,
+    );
+  }
+}
 const security = cli.security_opt;
 assert.deepEqual(security, ["seccomp=unconfined", "systempaths=unconfined"]);
 const securityArgs = security.flatMap((option) => ["--security-opt", option]);
@@ -60,27 +83,34 @@ if (expectedCliVersion)
 console.log(`${selected}: ${image}\nDigest: ${digest}\n${version}`);
 // Exercise the example's fresh volumes with the image's default user. These
 // probes have no network, account credentials or model requests.
-if (selected === "supported") {
+if (requiredContainer) {
   const socket = `codex-ci-socket-${process.pid}`;
   const workspace = `codex-ci-workspace-${process.pid}`;
+  const daemon = `codex-ci-daemon-${process.pid}`;
   const probe = `codex-ci-cli-volume-${process.pid}`;
-  const volume = compose.volumes.codex_socket;
-  docker([
-    "volume",
-    "create",
-    "--driver",
-    volume.driver,
-    ...Object.entries(volume.driver_opts).flatMap(([key, value]) => [
-      "--opt",
-      `${key}=${value}`,
-    ]),
-    socket,
-  ]);
+  for (const [name, volume] of [
+    [socket, compose.volumes.codex_socket],
+    [daemon, compose.volumes.codex_daemon],
+  ]) {
+    docker([
+      "volume",
+      "create",
+      "--driver",
+      volume.driver,
+      ...Object.entries(volume.driver_opts).flatMap(([key, value]) => [
+        "--opt",
+        `${key}=${value}`,
+      ]),
+      name,
+    ]);
+  }
   docker(["volume", "create", workspace]);
   try {
     const mounts = [
       "--volume",
       `${socket}:/run/codex`,
+      "--volume",
+      `${daemon}:/tmp/codex-daemon-1000`,
       "--volume",
       `${workspace}:/workspace`,
       "--volume",
@@ -96,7 +126,7 @@ if (selected === "supported") {
       "/bin/sh",
       digest,
       "-ec",
-      'test "$(id -u)" = 1000 && test "$(stat -c %a /run/codex)" = 770 && test -w /run/codex && echo workspace-probe > /workspace/.compose-probe && grep -qx workspace-probe /home/node/Documents/Codex/.compose-probe',
+      'test "$(id -u)" = 1000 && test "$(stat -c %a /run/codex)" = 700 && test -w /run/codex && test "$(stat -c %a /tmp/codex-daemon-1000)" = 700 && test -w /tmp/codex-daemon-1000 && echo workspace-probe > /workspace/.compose-probe && grep -qx workspace-probe /home/node/Documents/Codex/.compose-probe',
     ]);
     docker([
       "run",
@@ -124,6 +154,22 @@ if (selected === "supported") {
       ready,
       "Compose app-server must create its socket on the fresh tmpfs volume",
     );
+    // Check the alias from a separate container with the web service's mounts.
+    // Merely checking inside the CLI container misses dangling cross-container links.
+    docker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      ...mounts,
+      "--entrypoint",
+      "/bin/sh",
+      digest,
+      "-ec",
+      selected === "supported-current"
+        ? 'test -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock && test -S "$(readlink /run/codex/app-server.sock)"'
+        : "test ! -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock",
+    ]);
     console.log(
       "Compose default UID 1000, tmpfs socket, healthcheck and both workspace paths verified",
     );
@@ -136,9 +182,19 @@ if (selected === "supported") {
     try {
       docker(["rm", "--force", probe]);
     } catch {}
-    docker(["volume", "rm", socket, workspace]);
+    docker(["volume", "rm", socket, daemon, workspace]);
   }
 }
+
+// The wrapper runs as the host test user; the CLI requires exact owner-only mode.
+await fs.mkdir(`/tmp/codex-daemon-${process.getuid()}`, {
+  recursive: true,
+  mode: 0o700,
+});
+assert.equal(
+  (await fs.stat(`/tmp/codex-daemon-${process.getuid()}`)).mode & 0o777,
+  0o700,
+);
 
 const anchor = `codex-ci-network-${selected}`;
 docker([
