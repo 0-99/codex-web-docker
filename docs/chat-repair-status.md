@@ -25,7 +25,9 @@ unknown outcome and are not replayed.
 After a forwarded chat RPC remains unanswered for five seconds, the status
 panel identifies the pending action without showing request data. An RPC error
 is shown with its numeric code for ten seconds. These states do not cancel or
-retry the request. The built-image browser test delays `thread/start` for
+retry the request. A successful `turn/start` reply only acknowledges the turn;
+the relay keeps a separate waiting state until `turn/completed`, including while
+an MCP server times out. The built-image browser test delays `thread/start` for
 25 seconds and configures a synthetic MCP server whose handshake exceeds its
 startup deadline.
 

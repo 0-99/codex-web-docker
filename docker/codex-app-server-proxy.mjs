@@ -94,6 +94,8 @@ const status = createStatusReporter();
 const pendingMessages = [];
 const inFlight = new Map();
 const requestTimes = new Map();
+const activeTurns = new Map();
+const completedBeforeStartReply = new Set();
 let traceFile = process.env.CODEX_WEB_RPC_TRACE_FILE || null;
 const tracedMethods = new Set([
   "thread/start", "thread/read", "thread/resume", "thread/list", "turn/start",
@@ -188,7 +190,8 @@ function readyStatus() {
 }
 function refreshChatStatus(failed = null) {
   if (!connectionReady) return;
-  const waiting = [...requestTimes.values()].find((item) => item.visible);
+  const waiting = [...requestTimes.values(), ...activeTurns.values()]
+    .find((item) => item.visible);
   if (waiting) {
     clearTimeout(rpcErrorTimer);
     rpcErrorTimer = null;
@@ -245,6 +248,9 @@ function stop(exitCode = 0) {
   clearTimeout(rpcErrorTimer);
   for (const timing of requestTimes.values()) clearTimeout(timing.slowTimer);
   requestTimes.clear();
+  for (const turn of activeTurns.values()) clearTimeout(turn.slowTimer);
+  activeTurns.clear();
+  completedBeforeStartReply.clear();
   for (const pending of internalRequests.values())
     pending.reject(new Error("proxy stopped"));
   internalRequests.clear();
@@ -327,6 +333,22 @@ function trackResponse(message) {
   inFlight.delete(message.id);
   traceCompletion(request, message.error ? "error" : "completed", message.error?.code ?? null);
   if (message.error) return;
+  if (request.method === "turn/start" && typeof message.result?.turn?.id === "string") {
+    const turnId = message.result.turn.id;
+    // Notifications can overtake the start reply on the wire. In that case
+    // there is no active turn left to display or time out.
+    if (!completedBeforeStartReply.delete(turnId)) {
+      // turn/start only acknowledges the request. MCP startup and model work
+      // can continue afterward, so keep a visible state until completion.
+      const turn = { method: "turn/start", visible: false, slowTimer: null };
+      turn.slowTimer = setTimeout(() => {
+        if (!connectionReady || activeTurns.get(turnId) !== turn) return;
+        turn.visible = true;
+        refreshChatStatus();
+      }, rpcSlowMs);
+      activeTurns.set(turnId, turn);
+    }
+  }
   if (
     request.method === "turn/start" &&
     threads.has(request.params?.threadId)
@@ -591,6 +613,19 @@ function connect() {
     if (isRequest(message)) serverRequests.add(message.id);
     if (message) {
       trackResponse(message);
+      if (message.method === "turn/completed" && typeof message.params?.turn?.id === "string") {
+        const turn = activeTurns.get(message.params.turn.id);
+        if (turn) {
+          clearTimeout(turn.slowTimer);
+          activeTurns.delete(message.params.turn.id);
+          refreshChatStatus(message.params.turn.status === "failed"
+            ? { method: "turn/start", errorCode: null } : null);
+        } else if ([...inFlight.values()].some((request) => request.method === "turn/start")) {
+          if (completedBeforeStartReply.size >= 100)
+            completedBeforeStartReply.delete(completedBeforeStartReply.values().next().value);
+          completedBeforeStartReply.add(message.params.turn.id);
+        }
+      }
       if (
         ["thread/archived", "thread/deleted", "thread/closed"].includes(
           message.method,
@@ -621,6 +656,9 @@ function connect() {
         "App-server connection lost; request outcome is unknown. It was not retried.",
       );
     inFlight.clear();
+    for (const turn of activeTurns.values()) clearTimeout(turn.slowTimer);
+    activeTurns.clear();
+    completedBeforeStartReply.clear();
     scheduleReconnect(
       connectionError || new Error(`connection closed with code ${code}`),
     );

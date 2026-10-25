@@ -165,8 +165,16 @@ test("slow chat RPCs publish a visible waiting state and preserve a failing repl
       socket.send(JSON.stringify({ id: request.id, result: {} }));
     else if (request.method === "thread/start")
       setTimeout(() => socket.send(JSON.stringify({ id: request.id, result: {} })), 250);
-    else if (request.method === "turn/start")
-      socket.send(JSON.stringify({ id: request.id, error: { code: -32603, message: "test failure" } }));
+    else if (request.method === "turn/start") {
+      if (request.id === "turn-live") {
+        socket.send(JSON.stringify({ id: request.id, result: { turn: { id: "ci-turn" } } }));
+        setTimeout(() => socket.send(JSON.stringify({
+          method: "turn/completed", params: { turn: { id: "ci-turn", status: "completed" } },
+        })), 250);
+      } else {
+        socket.send(JSON.stringify({ id: request.id, error: { code: -32603, message: "test failure" } }));
+      }
+    }
   }));
   await once(appServer, "listening");
   const child = spawnProxy(t, `ws://127.0.0.1:${appServer.address().port}`, {
@@ -192,6 +200,15 @@ test("slow chat RPCs publish a visible waiting state and preserve a failing repl
   for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-error"); i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
   assert.ok(statusMessages.some((m) => m.phase === "rpc-error" && m.errorCode === -32603));
+  const liveStart = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "turn-live", method: "turn/start" }) + "\n");
+  assert.equal(JSON.parse((await liveStart)[0]).result.turn.id, "ci-turn");
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "turn/start"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "turn/start"));
+  for (let i = 0; i < 100 && statusMessages.at(-1)?.phase !== "ready"; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(statusMessages.at(-1)?.phase, "ready");
   child.stdin.end();
   assert.equal((await once(child, "exit"))[0], 0);
 });
