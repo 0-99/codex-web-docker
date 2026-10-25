@@ -51,9 +51,22 @@
       degraded:
         "App-Server verbunden · ein Thread konnte nicht wiederhergestellt werden",
       failed: "Verbindung beendet · bitte Serverprotokoll prüfen",
+      failureKinds: {
+        "retry-exhausted": "App-Server nach mehreren Versuchen nicht erreichbar",
+        "relay-disconnected": "App-Server-Relay beendet · bitte Serverprotokoll prüfen",
+      },
       backend:
         "Verbindung zum Web-Backend unterbrochen · wir verbinden erneut …",
       loading: "App-Server verbunden · Oberfläche wird geladen …",
+      "rpc-waiting": "Chat-Anfrage wird bearbeitet …",
+      "rpc-error": "Chat-Anfrage fehlgeschlagen · bitte erneut versuchen",
+      rpcActions: {
+        "thread/start": "Neuer Chat wird angelegt …",
+        "thread/read": "Chatverlauf wird geladen …",
+        "thread/resume": "Chat wird wiederhergestellt …",
+        "turn/start": "Antwort wird gestartet …",
+      },
+      errorCode: (code) => `Fehlercode ${code}`,
       details: "Verbindungsstatus",
       next: (seconds) => `Nächster Versuch in ${seconds} s`,
       threads: (done, total) =>
@@ -68,8 +81,21 @@
       ready: "Ready",
       degraded: "App-server connected · a thread could not be restored",
       failed: "Connection stopped · please check the server log",
+      failureKinds: {
+        "retry-exhausted": "App-server unavailable after repeated attempts",
+        "relay-disconnected": "App-server relay stopped · please check the server log",
+      },
       backend: "Web backend disconnected · reconnecting …",
       loading: "App-server connected · loading interface …",
+      "rpc-waiting": "Chat request is still running …",
+      "rpc-error": "Chat request failed · please try again",
+      rpcActions: {
+        "thread/start": "Creating chat …",
+        "thread/read": "Loading chat history …",
+        "thread/resume": "Restoring chat …",
+        "turn/start": "Starting response …",
+      },
+      errorCode: (code) => `Error code ${code}`,
       details: "Connection status",
       next: (seconds) => `Next attempt in ${seconds} s`,
       threads: (done, total) => `${done} of ${total} threads restored`,
@@ -95,6 +121,10 @@
       ? text.backend
       : state.phase === "ready" && starting
         ? text.loading
+        : state.phase === "failed" && text.failureKinds[state.failureKind]
+          ? text.failureKinds[state.failureKind]
+        : state.phase === "rpc-waiting"
+          ? text.rpcActions[state.rpcMethod] || text["rpc-waiting"]
         : text[state.phase];
     if (title.textContent !== heading) title.textContent = heading;
     const remaining = Math.max(
@@ -108,6 +138,8 @@
         ? text.next(remaining)
         : state.phase === "resuming"
           ? text.threads(state.completed || 0, state.total || 0)
+          : state.phase === "rpc-error" && Number.isSafeInteger(state.errorCode)
+            ? text.errorCode(state.errorCode)
           : "";
     summary.textContent = text.details;
     const steps = [

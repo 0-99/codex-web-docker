@@ -3,6 +3,7 @@
 import process from "node:process";
 import readline from "node:readline";
 import net from "node:net";
+import { appendFileSync } from "node:fs";
 import { WebSocket } from "ws";
 import { randomUUID } from "node:crypto";
 import { integerSetting, retryPolicy } from "./retry-policy.mjs";
@@ -69,7 +70,7 @@ function appServerConnection() {
 
 parseInvocation(process.argv.slice(2));
 const connection = appServerConnection();
-let policy, maxPayload, handshakeTimeout, resumeTimeout;
+let policy, maxPayload, handshakeTimeout, resumeTimeout, rpcSlowMs;
 try {
   policy = retryPolicy(process.env, (message) => log(message));
   maxPayload = integerSetting(process.env, "MAX_PAYLOAD", 100 * 1024 * 1024, 1);
@@ -80,6 +81,7 @@ try {
     1,
   );
   resumeTimeout = integerSetting(process.env, "RESUME_TIMEOUT_MS", 30_000, 1);
+  rpcSlowMs = integerSetting(process.env, "RPC_SLOW_MS", 5_000, 1);
 } catch (error) {
   fail(error.message);
 }
@@ -91,6 +93,20 @@ const failureAction = configuredChoice(
 const status = createStatusReporter();
 const pendingMessages = [];
 const inFlight = new Map();
+const requestTimes = new Map();
+const activeTurns = new Map();
+const completedBeforeStartReply = new Set();
+let traceFile = process.env.CODEX_WEB_RPC_TRACE_FILE || null;
+const tracedMethods = new Set([
+  "thread/start", "thread/read", "thread/resume", "thread/list", "turn/start",
+  // The local relay sees no durable-host traffic. This method-only record can
+  // distinguish a local file failure from the separate durable connection.
+  "fs/readFile",
+]);
+const chatMethods = new Set([
+  "thread/start", "thread/read", "thread/resume", "turn/start",
+]);
+let rpcErrorTimer = null;
 const serverRequests = new Set();
 const threads = new Map();
 const resumeErrors = new Map();
@@ -164,7 +180,59 @@ function isRequest(message) {
   );
 }
 function errorResponse(request, message, code = -32001) {
+  traceCompletion(request, "error", code);
   if (isRequest(request)) output({ id: request.id, error: { code, message } });
+}
+function readyStatus() {
+  status.update(resumeErrors.size ? "degraded" : "ready", {
+    failedThreads: resumeErrors.size,
+  });
+}
+function refreshChatStatus(failed = null) {
+  if (!connectionReady) return;
+  const waiting = [...requestTimes.values(), ...activeTurns.values()]
+    .find((item) => item.visible);
+  if (waiting) {
+    clearTimeout(rpcErrorTimer);
+    rpcErrorTimer = null;
+    status.update("rpc-waiting", { rpcMethod: waiting.method });
+    return;
+  }
+  if (failed && chatMethods.has(failed.method)) {
+    status.update("rpc-error", {
+      rpcMethod: failed.method,
+      errorCode: failed.errorCode,
+    });
+    clearTimeout(rpcErrorTimer);
+    rpcErrorTimer = setTimeout(() => {
+      rpcErrorTimer = null;
+      if (connectionReady && ![...requestTimes.values()].some((item) => item.visible))
+        readyStatus();
+    }, 10_000);
+  } else if (!rpcErrorTimer) {
+    readyStatus();
+  }
+}
+function traceCompletion(request, state, errorCode = null) {
+  if (!isRequest(request)) return;
+  const timing = requestTimes.get(request.id);
+  if (!timing) return;
+  requestTimes.delete(request.id);
+  clearTimeout(timing.slowTimer);
+  if (timing.visible || (state === "error" && chatMethods.has(timing.method))) {
+    refreshChatStatus(state === "error" ? { method: timing.method, errorCode } : null);
+  }
+  if (!traceFile) return;
+  try {
+    const code = Number.isSafeInteger(errorCode) ? errorCode : null;
+    // Desktop treats every proxy stderr line as a connection error. Write
+    // optional, content-free diagnostics to a dedicated file instead.
+    appendFileSync(traceFile, `rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${code}\n`);
+  } catch {
+    // The trace is diagnostic only; a full or unwritable file must not break
+    // the app-server connection.
+    traceFile = null;
+  }
 }
 function formatDuration(ms) {
   if (ms % 60_000 === 0)
@@ -177,6 +245,12 @@ function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   clearTimeout(reconnectTimeout);
+  clearTimeout(rpcErrorTimer);
+  for (const timing of requestTimes.values()) clearTimeout(timing.slowTimer);
+  requestTimes.clear();
+  for (const turn of activeTurns.values()) clearTimeout(turn.slowTimer);
+  activeTurns.clear();
+  completedBeforeStartReply.clear();
   for (const pending of internalRequests.values())
     pending.reject(new Error("proxy stopped"));
   internalRequests.clear();
@@ -191,7 +265,7 @@ function scheduleReconnect(error) {
   log(`app-server connection failed: ${error.message}`);
   const next = policy.next(++retryAttempt);
   if (!next) {
-    status.update("failed");
+    status.update("failed", { failureKind: "retry-exhausted" });
     log(`giving up ${policy.exhausted}`);
     for (const { parsed } of pendingMessages.splice(0))
       errorResponse(parsed, "App-server reconnect attempts exhausted.");
@@ -257,7 +331,24 @@ function trackResponse(message) {
   )
     return;
   inFlight.delete(message.id);
+  traceCompletion(request, message.error ? "error" : "completed", message.error?.code ?? null);
   if (message.error) return;
+  if (request.method === "turn/start" && typeof message.result?.turn?.id === "string") {
+    const turnId = message.result.turn.id;
+    // Notifications can overtake the start reply on the wire. In that case
+    // there is no active turn left to display or time out.
+    if (!completedBeforeStartReply.delete(turnId)) {
+      // turn/start only acknowledges the request. MCP startup and model work
+      // can continue afterward, so keep a visible state until completion.
+      const turn = { method: "turn/start", visible: false, slowTimer: null };
+      turn.slowTimer = setTimeout(() => {
+        if (!connectionReady || activeTurns.get(turnId) !== turn) return;
+        turn.visible = true;
+        refreshChatStatus();
+      }, rpcSlowMs);
+      activeTurns.set(turnId, turn);
+    }
+  }
   if (
     request.method === "turn/start" &&
     threads.has(request.params?.threadId)
@@ -285,7 +376,7 @@ function trackResponse(message) {
     });
   }
 }
-function forward({ raw, parsed }) {
+function forward({ raw, parsed, queuedAt }) {
   // Server-initiated request IDs belong to this connection only. In particular,
   // do not deliver an old approval response to a restarted server.
   if (parsed && !parsed.method && Object.hasOwn(parsed, "id")) {
@@ -310,13 +401,37 @@ function forward({ raw, parsed }) {
     );
     return;
   }
-  if (isRequest(parsed)) inFlight.set(parsed.id, parsed);
+  if (isRequest(parsed)) {
+    inFlight.set(parsed.id, parsed);
+    if (tracedMethods.has(parsed.method)) {
+      const timing = requestTimes.get(parsed.id);
+      if (timing) {
+        timing.waitMs = queuedAt ? Date.now() - queuedAt : 0;
+        if (chatMethods.has(parsed.method)) {
+          // Connection status covers queued requests. Surface long-running chat
+          // work only after forwarding it, without replaying or timing it out.
+          timing.slowTimer = setTimeout(() => {
+            if (!connectionReady || !inFlight.has(parsed.id)) return;
+            timing.visible = true;
+            refreshChatStatus();
+          }, rpcSlowMs);
+        }
+      }
+    }
+  }
   socket.send(raw);
 }
 function receiveInput(raw) {
   const original = parse(raw);
   const parsed = withoutDesktopAppMcp(original);
   if (parsed !== original) raw = JSON.stringify(parsed);
+  if (isRequest(parsed) && tracedMethods.has(parsed.method)) {
+    requestTimes.set(parsed.id, {
+      method: parsed.method,
+      startedAt: Date.now(),
+      waitMs: 0,
+    });
+  }
   if (parsed?.method === "initialize" && isRequest(parsed)) {
     initializeRequest = { id: parsed.id, raw };
     startInitialize?.();
@@ -333,7 +448,7 @@ function receiveInput(raw) {
   } else if (parsed && !parsed.method) {
     return; // Stale server responses cannot be queued across connections.
   } else if (pendingMessages.length < 1000) {
-    pendingMessages.push({ raw, parsed });
+    pendingMessages.push({ raw, parsed, queuedAt: Date.now() });
   } else {
     errorResponse(
       parsed,
@@ -498,6 +613,19 @@ function connect() {
     if (isRequest(message)) serverRequests.add(message.id);
     if (message) {
       trackResponse(message);
+      if (message.method === "turn/completed" && typeof message.params?.turn?.id === "string") {
+        const turn = activeTurns.get(message.params.turn.id);
+        if (turn) {
+          clearTimeout(turn.slowTimer);
+          activeTurns.delete(message.params.turn.id);
+          refreshChatStatus(message.params.turn.status === "failed"
+            ? { method: "turn/start", errorCode: null } : null);
+        } else if ([...inFlight.values()].some((request) => request.method === "turn/start")) {
+          if (completedBeforeStartReply.size >= 100)
+            completedBeforeStartReply.delete(completedBeforeStartReply.values().next().value);
+          completedBeforeStartReply.add(message.params.turn.id);
+        }
+      }
       if (
         ["thread/archived", "thread/deleted", "thread/closed"].includes(
           message.method,
@@ -528,6 +656,9 @@ function connect() {
         "App-server connection lost; request outcome is unknown. It was not retried.",
       );
     inFlight.clear();
+    for (const turn of activeTurns.values()) clearTimeout(turn.slowTimer);
+    activeTurns.clear();
+    completedBeforeStartReply.clear();
     scheduleReconnect(
       connectionError || new Error(`connection closed with code ${code}`),
     );

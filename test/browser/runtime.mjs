@@ -89,6 +89,19 @@ test(
         '<div class="zoom-adjusted-viewport"><main class="main-surface"><header>Codex</header><div class="messages"><div style="height:2000px">Conversation</div></div><textarea aria-label="Message"></textarea></main></div>';
     });
     await page.locator("#codex-web-status").waitFor({ state: "hidden" });
+    reporter.update("rpc-waiting", { rpcMethod: "thread/start" });
+    await page.getByText("Neuer Chat wird angelegt …", { exact: true }).waitFor();
+    reporter.update("rpc-error", { rpcMethod: "thread/start", errorCode: -32603 });
+    await page.getByText("Chat-Anfrage fehlgeschlagen · bitte erneut versuchen", { exact: true }).first().waitFor();
+    await page.getByText("Fehlercode -32603", { exact: true }).waitFor();
+    reporter.update("ready");
+    await page.locator("#codex-web-status").waitFor({ state: "hidden" });
+    reporter.update("failed", { failureKind: "retry-exhausted" });
+    await page.getByText("App-Server nach mehreren Versuchen nicht erreichbar", { exact: true }).first().waitFor();
+    reporter.update("failed", { failureKind: "relay-disconnected" });
+    await page.getByText("App-Server-Relay beendet · bitte Serverprotokoll prüfen", { exact: true }).first().waitFor();
+    reporter.update("ready");
+    await page.locator("#codex-web-status").waitFor({ state: "hidden" });
     const composer = page.getByRole("textbox");
     await composer.fill("Unsent draft");
     async function assertComposerVisible() {

@@ -44,6 +44,10 @@ async function fixture(t, createWindow) {
       socket,
       messages,
       send: (value) => socket.send(JSON.stringify(value)),
+      async responseRaw(requestId) {
+        await until(() => messages.some((m) => m.requestId === requestId));
+        return messages.find((m) => m.requestId === requestId);
+      },
       async response(requestId) {
         await until(() => messages.some((m) => m.requestId === requestId));
         const value = messages.find((m) => m.requestId === requestId);
@@ -114,6 +118,22 @@ test(
     assert.notEqual(await replacement.response("replacement"), firstId);
   },
 );
+
+test("a synchronous desktop invoke failure returns an IPC error and keeps the backend alive", { timeout: 5000 }, async (t) => {
+  const open = await fixture(t);
+  const client = await open();
+  const bridge = globalThis.__codexElectronIpcBridge;
+  const original = bridge.handleRendererInvoke;
+  t.after(() => { bridge.handleRendererInvoke = original; });
+  bridge.handleRendererInvoke = () => { throw new Error("optional command unavailable"); };
+  client.send({ type: "ipc-renderer-invoke", channel: "test-failure", args: [], requestId: "failed" });
+  const failure = await client.responseRaw("failed");
+  assert.equal(failure.ok, false);
+  assert.match(failure.errorMessage, /optional command unavailable/);
+  bridge.handleRendererInvoke = () => "still running";
+  client.send({ type: "ipc-renderer-invoke", channel: "test-recovery", args: [], requestId: "recovered" });
+  assert.equal(await client.response("recovered"), "still running");
+});
 
 test(
   "early MessagePort data remains buffered and scoped to its browser tab",

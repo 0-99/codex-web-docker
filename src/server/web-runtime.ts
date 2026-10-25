@@ -16,6 +16,9 @@ type Status = {
   completed?: number;
   total?: number;
   failedThreads?: number;
+  rpcMethod?: string;
+  errorCode?: number | null;
+  failureKind?: "retry-exhausted" | "relay-disconnected";
 };
 const phases = new Set([
   "connecting",
@@ -25,6 +28,11 @@ const phases = new Set([
   "ready",
   "degraded",
   "failed",
+  "rpc-waiting",
+  "rpc-error",
+]);
+const chatMethods = new Set([
+  "thread/start", "thread/read", "thread/resume", "turn/start",
 ]);
 
 export async function installWebRuntime(
@@ -182,6 +190,15 @@ export async function installWebRuntime(
               if (Number.isSafeInteger(value[key]) && value[key] >= 0)
                 next[key] = value[key];
             }
+            // Status data is visible to browsers. Admit only method names and
+            // numeric codes; never forward RPC parameters or backend messages.
+            if (chatMethods.has(value.rpcMethod))
+              next.rpcMethod = value.rpcMethod;
+            if (Number.isSafeInteger(value.errorCode))
+              next.errorCode = value.errorCode;
+            if (value.phase === "failed" &&
+              (value.failureKind === "retry-exhausted" || value.failureKind === "relay-disconnected"))
+              next.failureKind = value.failureKind;
             connections.set(socket, next);
             // If multiple managed proxies exist, never hide one still waiting.
             const waiting = [...connections.values()].find(
@@ -200,10 +217,13 @@ export async function installWebRuntime(
         if (last)
           publish(
             [...connections.values()].find((item) => item.phase !== "ready") ??
-              [...connections.values()].at(-1) ?? {
+              [...connections.values()].at(-1) ?? (last.phase === "failed" ? last : {
                 phase: "failed",
+                // A closed side channel says only that its relay disappeared;
+                // it does not establish that the CLI exhausted retries.
+                failureKind: "relay-disconnected",
                 updatedAt: Date.now(),
-              },
+              }),
           );
       });
     });

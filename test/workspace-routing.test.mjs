@@ -225,6 +225,11 @@ test("discovery failures, invalid responses, redirects and cancellation never gr
       throw Error("offline");
     },
     async () => new Response("", { status: 403 }),
+    // A Cloudflare challenge is not an authenticated workspace proof.
+    async () => new Response("<title>Just a moment...</title>", {
+      status: 403,
+      headers: { "content-type": "text/html", server: "cloudflare" },
+    }),
     async () => new Response("not json"),
     async () => ({ ok: true, redirected: true }),
     async () => ({ ok: true, url: "https://other.example.invalid" }),

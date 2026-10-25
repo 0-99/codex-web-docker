@@ -131,6 +131,88 @@ test("bridges JSONL stdio to a WebSocket app-server", async (t) => {
   await assertBridge(t, `ws://127.0.0.1:${address.port}`);
 });
 
+test("slow chat RPCs publish a visible waiting state and preserve a failing reply", { timeout: 5000 }, async (t) => {
+  const statusMessages = [];
+  const statusSockets = new Set();
+  const statusServer = net.createServer((socket) => {
+    statusSockets.add(socket);
+    socket.on("close", () => statusSockets.delete(socket));
+    let buffer = "";
+    socket.on("data", (chunk) => {
+      buffer += chunk;
+      let newline;
+      while ((newline = buffer.indexOf("\n")) >= 0) {
+        const message = JSON.parse(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        if (message.token !== "ci-status") statusMessages.push(message);
+      }
+    });
+  });
+  statusServer.listen(0, "127.0.0.1");
+  await once(statusServer, "listening");
+  t.after(() => {
+    for (const socket of statusSockets) socket.destroy();
+    return new Promise((resolve) => statusServer.close(resolve));
+  });
+  const appServer = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(() => {
+    for (const socket of appServer.clients) socket.terminate();
+    return new Promise((resolve) => appServer.close(resolve));
+  });
+  appServer.on("connection", (socket) => socket.on("message", (data) => {
+    const request = JSON.parse(String(data));
+    if (request.method === "initialize")
+      socket.send(JSON.stringify({ id: request.id, result: {} }));
+    else if (request.method === "thread/start")
+      setTimeout(() => socket.send(JSON.stringify({ id: request.id, result: {} })), 250);
+    else if (request.method === "turn/start") {
+      if (request.id === "turn-live") {
+        socket.send(JSON.stringify({ id: request.id, result: { turn: { id: "ci-turn" } } }));
+        setTimeout(() => socket.send(JSON.stringify({
+          method: "turn/completed", params: { turn: { id: "ci-turn", status: "completed" } },
+        })), 250);
+      } else {
+        socket.send(JSON.stringify({ id: request.id, error: { code: -32603, message: "test failure" } }));
+      }
+    }
+  }));
+  await once(appServer, "listening");
+  const child = spawnProxy(t, `ws://127.0.0.1:${appServer.address().port}`, {
+    CODEX_WEB_STATUS_ADDRESS: `${statusServer.address().port}:ci-status`,
+    CODEX_APP_SERVER_RPC_SLOW_MS: "20",
+  });
+  const output = readline.createInterface({ input: child.stdout });
+  const initialized = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "init", method: "initialize" }) + "\n");
+  await initialized;
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "ready"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "ready"), JSON.stringify(statusMessages));
+  const started = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "start", method: "thread/start" }) + "\n");
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-waiting"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "thread/start"), JSON.stringify(statusMessages));
+  assert.equal(JSON.parse((await started)[0]).id, "start");
+  const failed = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "turn", method: "turn/start" }) + "\n");
+  assert.equal(JSON.parse((await failed)[0]).error.code, -32603);
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-error"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "rpc-error" && m.errorCode === -32603));
+  const liveStart = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "turn-live", method: "turn/start" }) + "\n");
+  assert.equal(JSON.parse((await liveStart)[0]).result.turn.id, "ci-turn");
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "turn/start"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "turn/start"));
+  for (let i = 0; i < 100 && statusMessages.at(-1)?.phase !== "ready"; i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(statusMessages.at(-1)?.phase, "ready");
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
+});
+
 test("preserves initialize capabilities and account/policy RPCs byte for byte", async (t) => {
   const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
   t.after(() => new Promise((resolve) => server.close(resolve)));
@@ -169,6 +251,45 @@ test("preserves initialize capabilities and account/policy RPCs byte for byte", 
     seen.filter((raw) => JSON.parse(raw).id),
     messages,
   );
+  child.stdin.end();
+  assert.equal((await once(child, "exit"))[0], 0);
+});
+
+test("forwards a file environment error without inventing an environment or local fallback", async (t) => {
+  const server = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  let fileRequest;
+  server.on("connection", (socket) => socket.on("message", (data) => {
+    const request = JSON.parse(String(data));
+    if (request.method === "initialize")
+      socket.send(JSON.stringify({ id: request.id, result: {} }));
+    else if (request.method === "fs/readFile") {
+      fileRequest = request;
+      socket.send(JSON.stringify({
+        id: request.id,
+        error: { code: -32602, message: "fs/readFile requires an environmentId" },
+      }));
+    } else if (request.method === "thread/list")
+      socket.send(JSON.stringify({ id: request.id, result: { data: [] } }));
+  }));
+  await once(server, "listening");
+  const child = spawnProxy(t, `ws://127.0.0.1:${server.address().port}`);
+  const output = readline.createInterface({ input: child.stdout });
+  const initialized = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "init", method: "initialize" }) + "\n");
+  await initialized;
+  const fileResponse = once(output, "line");
+  child.stdin.write(JSON.stringify({
+    id: "file", method: "fs/readFile", params: { path: "/remote/optional.json" },
+  }) + "\n");
+  assert.deepEqual(JSON.parse((await fileResponse)[0]), {
+    id: "file",
+    error: { code: -32602, message: "fs/readFile requires an environmentId" },
+  });
+  assert.deepEqual(fileRequest.params, { path: "/remote/optional.json" });
+  const nextResponse = once(output, "line");
+  child.stdin.write(JSON.stringify({ id: "threads", method: "thread/list" }) + "\n");
+  assert.deepEqual(JSON.parse((await nextResponse)[0]), { id: "threads", result: { data: [] } });
   child.stdin.end();
   assert.equal((await once(child, "exit"))[0], 0);
 });
