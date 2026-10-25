@@ -13,22 +13,65 @@
 name: Publish Docker image
 
 on:
+  push:
+    branches: [main]
   release:
     types: [published]
   workflow_dispatch:
+
+# A newer main push cancels the quiet period, tests, or build for the old one.
+# Release and manual runs use separate groups and are never canceled by a push.
+concurrency:
+  group: publish-docker-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'push' }}
 
 env:
   DOCKER_IMAGE: 0to99/codex-web-docker
 
 jobs:
+  wait_for_main:
+    name: Wait for a quiet main branch
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      publish: ${{ steps.current.outputs.publish }}
+    steps:
+      - name: Wait 10 minutes after a main push
+        if: github.event_name == 'push'
+        run: sleep 600
+
+      - name: Check whether this is still the latest main commit
+        id: current
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+            if [[ "$head_sha" != "$EVENT_SHA" ]]; then
+              echo "main advanced to $head_sha; skipping $EVENT_SHA" >> "$GITHUB_STEP_SUMMARY"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+
   integration:
     name: Test real Desktop and app-server
+    needs: wait_for_main
+    if: needs.wait_for_main.outputs.publish == 'true'
     uses: ./.github/workflows/integration.yml
     permissions:
       contents: read
 
   smoke_test:
     name: Smoke-test every supported platform
+    needs: wait_for_main
+    if: needs.wait_for_main.outputs.publish == 'true'
     uses: ./.github/workflows/docker-smoke.yml
     permissions:
       contents: read
@@ -57,12 +100,30 @@ jobs:
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
         with:
           images: ${{ env.DOCKER_IMAGE }}
+          tags: |
+            type=edge,branch=main
+            type=ref,event=tag
+            type=ref,event=branch,enable=${{ github.event_name == 'workflow_dispatch' && github.ref != 'refs/heads/main' }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      - name: Confirm main has not advanced during tests
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_SHA: ${{ github.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          head_sha="$(gh api "repos/${GITHUB_REPOSITORY}/branches/main" --jq '.commit.sha')"
+          if [[ "$head_sha" != "$EVENT_SHA" ]]; then
+            echo "::error::main advanced to $head_sha; refusing to publish $EVENT_SHA"
+            exit 1
+          fi
 
       - name: Build and push Docker image
         id: push
