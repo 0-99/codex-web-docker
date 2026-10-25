@@ -2,13 +2,11 @@ name: Test real Desktop and app-server offline
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_call:
   workflow_dispatch:
 
 concurrency:
-  group: real-integration-${{ github.ref }}
+  group: real-integration-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

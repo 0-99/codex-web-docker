@@ -4,8 +4,6 @@ name: Smoke-test every supported platform
 
 on:
   pull_request:
-  push:
-    branches: [main]
   workflow_call:
 
 jobs:

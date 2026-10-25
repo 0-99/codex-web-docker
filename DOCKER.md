@@ -318,14 +318,22 @@ VPN in front of the web UI before exposing it beyond a trusted network.
 
 ## Docker Hub publishing
 
-The GitHub Actions workflow publishes releases to `0to99/codex-web-docker` on
-Docker Hub for all supported platforms. Configure these repository secrets:
+The GitHub Actions workflow publishes releases and the current `main` branch to
+`0to99/codex-web-docker` on Docker Hub for all supported platforms. Configure
+these repository secrets:
 
 - `DOCKER_USERNAME`
 - `DOCKER_PASSWORD` (use a Docker Hub access token)
 
 Publishing a GitHub release produces the release tag and the Docker metadata
 action's matching tags, including `latest` for a stable semantic version.
+The moving `edge` tag contains the latest successfully tested `main` commit.
+Publishing starts after `main` has been quiet for 10 minutes; another push restarts
+that wait and cancels the older publish run. The workflow runs the integration
+and platform smoke tests once after the wait, then verifies that `main` still
+points to the tested commit before building and pushing. A failed test leaves
+the existing `edge` image in place. `edge` does not update running containers;
+pull the new image and recreate the web container to use it.
 
 ### App-server image compatibility checks
 
