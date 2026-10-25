@@ -292,7 +292,7 @@ async function modelServer() {
   };
 }
 
-export async function appServerFixture(t, { chatgptAuth } = {}) {
+export async function appServerFixture(t, { chatgptAuth, slowMcp = false } = {}) {
   assert.equal(
     process.env.CODEX_TEST_NETWORK_ISOLATED,
     "1",
@@ -372,6 +372,14 @@ export async function appServerFixture(t, { chatgptAuth } = {}) {
       `base_url = ${JSON.stringify(model.url)}`,
       'wire_api = "responses"',
       `requires_openai_auth = ${Boolean(chatgptAuth)}`,
+      ...(slowMcp
+        ? [
+            "[mcp_servers.ci_unresponsive]",
+            'command = "/bin/sh"',
+            'args = ["-c", "sleep 60"]',
+            "startup_timeout_sec = 2",
+          ]
+        : []),
     ].join("\n"),
   );
   const reservation = net.createServer();

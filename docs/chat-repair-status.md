@@ -22,6 +22,13 @@ The trace records neither RPC parameters nor response bodies. Its in-flight
 requests remain single-use across reconnects; failed requests report an
 unknown outcome and are not replayed.
 
+After a forwarded chat RPC remains unanswered for five seconds, the status
+panel identifies the pending action without showing request data. An RPC error
+is shown with its numeric code for ten seconds. These states do not cancel or
+retry the request. The built-image browser test delays `thread/start` for
+25 seconds and configures a synthetic MCP server whose handshake exceeds its
+startup deadline.
+
 The pinned Desktop bundle could not be downloaded in this workspace because
 the configured HTTP proxy was unreachable. The Docker socket also denied
 access. GitHub Actions builds the actual Web runtime image and exercises saved
@@ -34,5 +41,20 @@ new-chat action was observed to issue one persistent and one ephemeral
 Bundle inspection found the GitHub helper's `appServerClient.spawn` path and
 its missing-command classification. The exact `gh --version` caller, the
 `fs/readFile` call without `environmentId`, the `durable` host association,
-MCP timeout behavior, and optional HTTP 403 behavior still need dedicated
-investigation and regression coverage.
+and optional HTTP 403 behavior still need dedicated investigation and
+regression coverage. The local relay can record content-free `fs/readFile`
+timings; it does not see the separate durable connection.
+
+The bundle has more than one `fs/readFile` caller: plugin manifest loading,
+attachment registry state, and executor file access. The executor path adds
+its own `environmentId`; the observed protocol error has not been tied to one
+of these callers. The relay therefore preserves an environment error instead
+of guessing an ID or reading a local file. Local thread read and turn requests
+are checked against the same local gateway in the browser test.
+
+`/accounts/optimized/check` participates in workspace selection, so an HTTP
+403 cannot be treated as a successful check. The routing regression explicitly
+rejects a Cloudflare-style 403. The observed 403s on optional cloud features
+such as automations and subscriptions have not been reproduced with the
+synthetic local account; their effect on a production ChatGPT session remains
+open.

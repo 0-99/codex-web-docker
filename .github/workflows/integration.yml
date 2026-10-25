@@ -25,13 +25,30 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check relay and status behavior before building the image
+        run: |
+          npm run build:server
+          node --test test/codex-app-server-proxy.test.mjs test/web-runtime.test.mjs
+      - name: Prepare pinned CLI 0.155.1 in an isolated network
+        run: node test/integration/prepare-container.mjs supported
+      - name: Verify the MCP timeout fixture before building the Web image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- ip link set lo up
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- \
+            runuser -u "$(id -un)" -- env "PATH=$PATH" \
+              "CODEX_TEST_CLI_PATH=$CODEX_TEST_CLI_PATH" \
+              "CODEX_TEST_IMAGE_REF=$CODEX_TEST_IMAGE_REF" \
+              "CODEX_TEST_NETWORK_CONTAINER=$CODEX_TEST_NETWORK_CONTAINER" \
+              "CODEX_TEST_CLI_SECURITY_OPTS=$CODEX_TEST_CLI_SECURITY_OPTS" \
+              CODEX_TEST_NETWORK_ISOLATED=1 \
+              "$(command -v node)" --test test/integration/mcp-timeout.mjs
       - run: npx playwright install --with-deps chromium
       - name: Build the actual Web runtime image
         run: docker build --build-arg SOURCE_REVISION=${{ github.sha }} --tag codex-web-chat-test:ci .
       - name: Confirm optional tools are absent from the runtime
         run: docker run --rm --network none --entrypoint /bin/sh codex-web-chat-test:ci -ec '! command -v gh; ! command -v git'
-      - name: Prepare pinned CLI 0.155.1 in an isolated network
-        run: node test/integration/prepare-container.mjs supported
       - name: Exercise the built Web image in the real browser
         shell: bash
         run: |

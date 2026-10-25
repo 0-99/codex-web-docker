@@ -46,9 +46,12 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
   const image = process.env.CODEX_TEST_WEB_IMAGE_REF;
   const anchor = process.env.CODEX_TEST_NETWORK_CONTAINER;
   assert.ok(image && anchor, "Set the built Web image and isolated network anchor");
-  const server = await appServerFixture(t);
+  // A real CLI MCP handshake that exceeds its startup deadline must not leave
+  // either chat permanently pending after the thread RPC completes.
+  const server = await appServerFixture(t, { slowMcp: true });
   const gateway = await pairingGateway(t, server, {
-    delayMethods: { "thread/start": 1_500, "thread/read": 500 },
+    // Match the observed slow start window while retaining real CLI replies.
+    delayMethods: { "thread/start": 25_000, "thread/read": 500 },
   });
   const seedSocket = await server.connect();
   server.cleanup(() => seedSocket.terminate());
@@ -73,7 +76,9 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
   await until(
     () => seed.messages.some((message) => message.method === "turn/completed" && message.params.turn.id === firstTurn.turn.id),
     "seeded turn completion",
+    60_000,
   );
+  await until(() => /ci_unresponsive/.test(server.log()), "MCP timeout diagnostic", 15_000);
   const initialThreads = listedThreadIds(await seed.call("thread/list", {}));
 
   // The Web image has its own synthetic home. It sees the shared workspace and
@@ -112,6 +117,7 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     "--env", "CODEX_WEB_BASE_PATH=/ci/nested/",
     "--env", "CODEX_WEB_DISABLE_INTERNAL_APP_MCP=1",
     "--env", "CODEX_WEB_RPC_TRACE_FILE=/home/node/.codex/rpc-trace.log",
+    "--env", "CODEX_WEB_RPC_SLOW_MS=2000",
     "--env", "CODEX_APP_SERVER_RETRY_DELAYS_MS=100",
     image,
   ]);
@@ -177,6 +183,7 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     startsAfterNewClick = rpcCount(gateway, "thread/start");
     await composer.fill("Start one new CI conversation.");
     await page.getByRole("button", { name: "Send", exact: true }).click();
+    await page.locator("#codex-web-status").getByText("Creating chat …", { exact: true }).waitFor();
     await page.getByText("CI assistant response 3", { exact: true }).first().waitFor();
     let finalThreads;
     await until(async () => {
@@ -186,6 +193,19 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     }, "new persistent thread", 15_000);
     assert.equal([...finalThreads].filter((id) => !initialThreads.has(id)).length, 1,
       "one new persistent thread appears in the CLI's thread list");
+    const newThreadId = [...finalThreads].find((id) => !initialThreads.has(id));
+    const localRequests = gateway.traffic
+      .filter(({ direction }) => direction === "request")
+      .map(({ message }) => message);
+    assert.ok(localRequests.some(({ method, params }) =>
+      ["thread/read", "thread/resume"].includes(method) && params?.threadId === threadId),
+    "the saved local thread is loaded through its local app-server");
+    assert.ok(localRequests.some(({ method, params }) =>
+      method === "turn/start" && params?.threadId === threadId),
+    "the saved local thread sends its turn to the same app-server");
+    assert.ok(localRequests.some(({ method, params }) =>
+      method === "turn/start" && params?.threadId === newThreadId),
+    "the new local thread sends its turn to the same app-server");
     assert.equal(server.model.requests.length, 3);
     assert.equal(containerState(name).Pid, initialPid, "the same Web backend process survives both chats");
     assert.deepEqual(pageErrors, []);

@@ -70,7 +70,7 @@ function appServerConnection() {
 
 parseInvocation(process.argv.slice(2));
 const connection = appServerConnection();
-let policy, maxPayload, handshakeTimeout, resumeTimeout;
+let policy, maxPayload, handshakeTimeout, resumeTimeout, rpcSlowMs;
 try {
   policy = retryPolicy(process.env, (message) => log(message));
   maxPayload = integerSetting(process.env, "MAX_PAYLOAD", 100 * 1024 * 1024, 1);
@@ -81,6 +81,7 @@ try {
     1,
   );
   resumeTimeout = integerSetting(process.env, "RESUME_TIMEOUT_MS", 30_000, 1);
+  rpcSlowMs = integerSetting(process.env, "CODEX_WEB_RPC_SLOW_MS", 5_000, 1);
 } catch (error) {
   fail(error.message);
 }
@@ -96,7 +97,14 @@ const requestTimes = new Map();
 let traceFile = process.env.CODEX_WEB_RPC_TRACE_FILE || null;
 const tracedMethods = new Set([
   "thread/start", "thread/read", "thread/resume", "thread/list", "turn/start",
+  // The local relay sees no durable-host traffic. This method-only record can
+  // distinguish a local file failure from the separate durable connection.
+  "fs/readFile",
 ]);
+const chatMethods = new Set([
+  "thread/start", "thread/read", "thread/resume", "turn/start",
+]);
+let rpcErrorTimer = null;
 const serverRequests = new Set();
 const threads = new Map();
 const resumeErrors = new Map();
@@ -173,16 +181,50 @@ function errorResponse(request, message, code = -32001) {
   traceCompletion(request, "error", code);
   if (isRequest(request)) output({ id: request.id, error: { code, message } });
 }
+function readyStatus() {
+  status.update(resumeErrors.size ? "degraded" : "ready", {
+    failedThreads: resumeErrors.size,
+  });
+}
+function refreshChatStatus(failed = null) {
+  if (!connectionReady) return;
+  const waiting = [...requestTimes.values()].find((item) => item.visible);
+  if (waiting) {
+    clearTimeout(rpcErrorTimer);
+    rpcErrorTimer = null;
+    status.update("rpc-waiting", { rpcMethod: waiting.method });
+    return;
+  }
+  if (failed && chatMethods.has(failed.method)) {
+    status.update("rpc-error", {
+      rpcMethod: failed.method,
+      errorCode: failed.errorCode,
+    });
+    clearTimeout(rpcErrorTimer);
+    rpcErrorTimer = setTimeout(() => {
+      rpcErrorTimer = null;
+      if (connectionReady && ![...requestTimes.values()].some((item) => item.visible))
+        readyStatus();
+    }, 10_000);
+  } else if (!rpcErrorTimer) {
+    readyStatus();
+  }
+}
 function traceCompletion(request, state, errorCode = null) {
   if (!isRequest(request)) return;
   const timing = requestTimes.get(request.id);
   if (!timing) return;
   requestTimes.delete(request.id);
+  clearTimeout(timing.slowTimer);
+  if (timing.visible || (state === "error" && chatMethods.has(timing.method))) {
+    refreshChatStatus(state === "error" ? { method: timing.method, errorCode } : null);
+  }
   if (!traceFile) return;
   try {
+    const code = Number.isSafeInteger(errorCode) ? errorCode : null;
     // Desktop treats every proxy stderr line as a connection error. Write
     // optional, content-free diagnostics to a dedicated file instead.
-    appendFileSync(traceFile, `rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${errorCode}\n`);
+    appendFileSync(traceFile, `rpc method=${timing.method} host=local transport=stdio+websocket waitMs=${timing.waitMs} durationMs=${Date.now() - timing.startedAt} state=${state} errorCode=${code}\n`);
   } catch {
     // The trace is diagnostic only; a full or unwritable file must not break
     // the app-server connection.
@@ -200,6 +242,9 @@ function stop(exitCode = 0) {
   if (stopping) return;
   stopping = true;
   clearTimeout(reconnectTimeout);
+  clearTimeout(rpcErrorTimer);
+  for (const timing of requestTimes.values()) clearTimeout(timing.slowTimer);
+  requestTimes.clear();
   for (const pending of internalRequests.values())
     pending.reject(new Error("proxy stopped"));
   internalRequests.clear();
@@ -338,7 +383,18 @@ function forward({ raw, parsed, queuedAt }) {
     inFlight.set(parsed.id, parsed);
     if (tracedMethods.has(parsed.method)) {
       const timing = requestTimes.get(parsed.id);
-      if (timing) timing.waitMs = queuedAt ? Date.now() - queuedAt : 0;
+      if (timing) {
+        timing.waitMs = queuedAt ? Date.now() - queuedAt : 0;
+        if (chatMethods.has(parsed.method)) {
+          // Connection status covers queued requests. Surface long-running chat
+          // work only after forwarding it, without replaying or timing it out.
+          timing.slowTimer = setTimeout(() => {
+            if (!connectionReady || !inFlight.has(parsed.id)) return;
+            timing.visible = true;
+            refreshChatStatus();
+          }, rpcSlowMs);
+        }
+      }
     }
   }
   socket.send(raw);

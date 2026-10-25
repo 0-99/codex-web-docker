@@ -80,6 +80,22 @@ test(
     reporter.update("connected");
     reporter.update("resuming", { completed: 0, total: 2 });
     await waitFor(f.snapshot, "resuming");
+    reporter.update("rpc-waiting", {
+      rpcMethod: "thread/start",
+      secret: "must not be exposed",
+    });
+    const waiting = await waitFor(f.snapshot, "rpc-waiting");
+    assert.equal(waiting.rpcMethod, "thread/start");
+    assert.equal(waiting.secret, undefined);
+    reporter.update("rpc-error", {
+      rpcMethod: "turn/start",
+      errorCode: -32603,
+      errorMessage: "must not be exposed",
+    });
+    const failed = await waitFor(f.snapshot, "rpc-error");
+    assert.equal(failed.rpcMethod, "turn/start");
+    assert.equal(failed.errorCode, -32603);
+    assert.equal(failed.errorMessage, undefined);
     reporter.update("ready");
     const ready = await waitFor(f.snapshot, "ready");
     assert.ok(ready.history.some((item) => item.phase === "resuming"));
