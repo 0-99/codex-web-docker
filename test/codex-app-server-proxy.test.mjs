@@ -164,7 +164,7 @@ test("slow chat RPCs publish a visible waiting state and preserve a failing repl
     if (request.method === "initialize")
       socket.send(JSON.stringify({ id: request.id, result: {} }));
     else if (request.method === "thread/start")
-      setTimeout(() => socket.send(JSON.stringify({ id: request.id, result: {} })), 100);
+      setTimeout(() => socket.send(JSON.stringify({ id: request.id, result: {} })), 250);
     else if (request.method === "turn/start")
       socket.send(JSON.stringify({ id: request.id, error: { code: -32603, message: "test failure" } }));
   }));
@@ -177,11 +177,14 @@ test("slow chat RPCs publish a visible waiting state and preserve a failing repl
   const initialized = once(output, "line");
   child.stdin.write(JSON.stringify({ id: "init", method: "initialize" }) + "\n");
   await initialized;
+  for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "ready"); i++)
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.ok(statusMessages.some((m) => m.phase === "ready"), JSON.stringify(statusMessages));
   const started = once(output, "line");
   child.stdin.write(JSON.stringify({ id: "start", method: "thread/start" }) + "\n");
   for (let i = 0; i < 100 && !statusMessages.some((m) => m.phase === "rpc-waiting"); i++)
     await new Promise((resolve) => setTimeout(resolve, 10));
-  assert.ok(statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "thread/start"));
+  assert.ok(statusMessages.some((m) => m.phase === "rpc-waiting" && m.rpcMethod === "thread/start"), JSON.stringify(statusMessages));
   assert.equal(JSON.parse((await started)[0]).id, "start");
   const failed = once(output, "line");
   child.stdin.write(JSON.stringify({ id: "turn", method: "turn/start" }) + "\n");
