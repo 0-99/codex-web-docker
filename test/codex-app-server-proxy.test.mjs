@@ -171,7 +171,7 @@ test("slow chat RPCs publish a visible waiting state and preserve a failing repl
   await once(appServer, "listening");
   const child = spawnProxy(t, `ws://127.0.0.1:${appServer.address().port}`, {
     CODEX_WEB_STATUS_ADDRESS: `${statusServer.address().port}:ci-status`,
-    CODEX_WEB_RPC_SLOW_MS: "20",
+    CODEX_APP_SERVER_RPC_SLOW_MS: "20",
   });
   const output = readline.createInterface({ input: child.stdout });
   const initialized = once(output, "line");

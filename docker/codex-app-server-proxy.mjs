@@ -81,7 +81,7 @@ try {
     1,
   );
   resumeTimeout = integerSetting(process.env, "RESUME_TIMEOUT_MS", 30_000, 1);
-  rpcSlowMs = integerSetting(process.env, "CODEX_WEB_RPC_SLOW_MS", 5_000, 1);
+  rpcSlowMs = integerSetting(process.env, "RPC_SLOW_MS", 5_000, 1);
 } catch (error) {
   fail(error.message);
 }

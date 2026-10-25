@@ -117,7 +117,7 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
     "--env", "CODEX_WEB_BASE_PATH=/ci/nested/",
     "--env", "CODEX_WEB_DISABLE_INTERNAL_APP_MCP=1",
     "--env", "CODEX_WEB_RPC_TRACE_FILE=/home/node/.codex/rpc-trace.log",
-    "--env", "CODEX_WEB_RPC_SLOW_MS=2000",
+    "--env", "CODEX_APP_SERVER_RPC_SLOW_MS=2000",
     "--env", "CODEX_APP_SERVER_RETRY_DELAYS_MS=100",
     image,
   ]);
