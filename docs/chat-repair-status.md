@@ -5,6 +5,16 @@ the Web Node process. The runtime Dockerfile installs Node but neither `gh`
 nor Git. The same log establishes two successful `thread/start` RPC replies;
 it does not establish successful turns or rendered chats.
 
+A read-only reproduction on 2026-10-25 narrows the trigger. The landing page
+and an unsent new-chat composer stayed available. Opening a saved chat logged
+`thread_resume_requested`, then a successful `thread/read` reply at
+12:14:42.624 UTC, followed by `spawn gh ENOENT` at 12:14:42.745 UTC.
+The Web container restarted repeatedly (restart count 3 to 8), while the CLI
+container did not restart. Subsequent resume attempts preceded the same
+missing-command crash. This establishes the failure sequence for opening a
+saved chat; the exact Desktop function that initiates the version probe is
+still not identified. No `turn/start` was exercised in that production run.
+
 This patch confines optional command handling to modules loaded from the
 Desktop bundle. A missing `gh` or `git` now produces a normal child exit with
 status 127 and an explanatory `command not found` stderr message for `spawn`
@@ -46,11 +56,17 @@ new-chat action was observed to issue one persistent and one ephemeral
 `thread/start`; the CLI listed one additional persistent thread.
 
 Bundle inspection found the GitHub helper's `appServerClient.spawn` path and
-its missing-command classification. The exact `gh --version` caller, the
-`fs/readFile` call without `environmentId`, the `durable` host association,
-and optional HTTP 403 behavior still need dedicated investigation and
-regression coverage. The local relay can record content-free `fs/readFile`
+its missing-command classification. The saved-chat action that precedes
+`gh --version` is now reproduced; its precise Desktop call chain remains
+unmapped. The `fs/readFile` call without `environmentId`, the `durable` host
+association, and optional HTTP 403 behavior still need dedicated investigation
+and regression coverage. The local relay can record content-free `fs/readFile`
 timings; it does not see the separate durable connection.
+
+The affected Web container had no retry overrides. Its source defaults retry
+the app-server connection indefinitely, and no `giving up` log was found.
+The observed "connection stopped" label followed Web process restarts; it
+does not establish exhausted relay retries or a CLI container failure.
 
 The bundle has more than one `fs/readFile` caller: plugin manifest loading,
 attachment registry state, and executor file access. The executor path adds
