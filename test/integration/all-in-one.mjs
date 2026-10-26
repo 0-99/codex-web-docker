@@ -63,6 +63,10 @@ test(
     assert.ok(image && anchor);
     const cleanup = fixtureCleanup(t);
     const localBridge = process.env.CODEX_TEST_LOCAL_BRIDGE === "1";
+    // GitHub's shared runners deny unprivileged mount namespaces. The local
+    // bridge test exercises Bubblewrap; CI still tests the actual CLI tool call
+    // inside its isolated network without requiring that host kernel feature.
+    const sandboxMode = localBridge ? "read-only" : "danger-full-access";
     const model = localBridge
       ? { url: "http://127.0.0.1:35711/v1" }
       : await modelServer({
@@ -122,7 +126,7 @@ test(
         'model = "ci-model"',
         'model_provider = "ci"',
         'approval_policy = "never"',
-        'sandbox_mode = "read-only"',
+        `sandbox_mode = "${sandboxMode}"`,
         'cli_auth_credentials_store = "file"',
         "[features]",
         "plugins = false",
@@ -264,7 +268,7 @@ test(
       model: "ci-model",
       modelProvider: "ci",
       approvalPolicy: "never",
-      sandbox: "read-only",
+      sandbox: sandboxMode,
     });
     const threadId = created.thread.id;
     const turn = await rpc.call("turn/start", {
