@@ -1,9 +1,9 @@
 # Docker image
 
-This fork publishes a CLI-free web frontend. The image never installs or starts
+The default image remains a CLI-free web frontend. It never installs or starts
 the Codex CLI. It starts only the browser frontend and its Electron-to-browser
 bridge, then connects that bridge to an independently managed `codex
-app-server`.
+app-server`. An additional [all-in-one image](#all-in-one-image) includes the CLI.
 
 The app-server does not have to run in Docker. It can run in another container,
 natively on the Docker host, or on another reachable system. Compatibility
@@ -386,6 +386,52 @@ These paths assume both containers run as UID 1000. For a custom numeric UID,
 adjust the daemon path in both mounts and the ownership of both socket volumes.
 The protected directory must be mounted at the same absolute path in both
 containers so the symlink resolves.
+## All-in-one image
+
+The optional image combines this Web build with the **same pinned CLI version**
+as the default Compose app-server (`0.164.0` at this revision). Both processes
+run as UID 1000 in one container and communicate over a private Unix socket;
+the CLI's protected socket target remains in the same container, so it needs no
+shared socket volume. The app-server does not expose a network port. The Web state, CLI login/history,
+and workspace use three separate persistent volumes. The image includes
+`codex`, `codex-code-mode-host`, `codex-bootstrap`, Bubblewrap, Git, SSH and
+Ripgrep. It supports `linux/amd64` and `linux/arm64`.
+
+```sh
+docker compose -f examples/all-in-one.compose.yml up -d
+docker compose -f examples/all-in-one.compose.yml exec codex codex-bootstrap device-auth
+docker compose -f examples/all-in-one.compose.yml exec codex codex-bootstrap status
+docker compose -f examples/all-in-one.compose.yml exec codex codex
+```
+
+Complete device authorization, trust `/workspace` in the interactive CLI, then
+open `http://127.0.0.1:8214/`. Set `CODEX_WEB_BASE_PATH` for a reverse-proxy
+subpath. The image's healthcheck requires both the Web endpoint and app-server
+socket. Restarting the container restarts both processes; the CLI volume retains
+authentication and thread history. The two-container example uses different
+volume names, so switching an existing installation requires an explicit data
+migration or volume mapping.
+
+The default `all-in-one-edge` tag follows successfully tested `main` commits.
+Stable GitHub releases publish `all-in-one-<release-tag>` alongside the existing
+Web image tag. Set `CODEX_ALL_IN_ONE_IMAGE` to a stable tag to keep a specific Web
+build; neither tag updates a running container automatically. The CLI is pinned
+inside both image types and is upgraded only with the supported image/test pin
+after required integration checks. The image records its CLI version in the
+`org.opencontainers.image.codex-cli-version` label.
+
+Codex's inner Bubblewrap sandbox needs `seccomp=unconfined` and
+`systempaths=unconfined` in the tested Docker setup. **These settings apply to
+the entire all-in-one container, including the Web process.** The separate
+Compose stack confines the Web container with Docker's defaults, so it remains
+the recommended option when this separation matters. The all-in-one example
+binds Web to loopback only. Add a VPN or authenticating reverse proxy before
+making the UI reachable beyond a trusted network; anyone who can use it can
+operate Codex with the container's permissions.
+
+To build locally from the checked-out Web source, use
+`docker build --target all-in-one -t codex-web:all-in-one .`. A plain
+`docker build .` still builds the CLI-free Web image.
 
 ## Docker Hub publishing
 

@@ -61,11 +61,25 @@ jobs:
               CODEX_TEST_WEB_IMAGE_REF=codex-web-chat-test:ci \
               CODEX_TEST_NETWORK_ISOLATED=1 \
               "$(command -v node)" --test test/integration/runtime-image.mjs
+      - name: Build the combined Web and CLI image
+        run: docker build --target all-in-one --build-arg SOURCE_REVISION=${{ github.sha }} --tag codex-all-in-one-chat-test:ci .
+      - name: Exercise real chats and restart in the combined image
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- ip link set lo up
+          sudo nsenter --target "$CODEX_TEST_NETWORK_PID" --net -- \
+            runuser -u "$(id -un)" -- env "PATH=$PATH" \
+              "CODEX_TEST_NETWORK_CONTAINER=$CODEX_TEST_NETWORK_CONTAINER" \
+              CODEX_TEST_ALL_IN_ONE_IMAGE_REF=codex-all-in-one-chat-test:ci \
+              CODEX_TEST_NETWORK_ISOLATED=1 \
+              "$(command -v node)" --test test/integration/all-in-one.mjs
       - name: Stop isolated test containers
         if: always()
         shell: bash
         run: |
           docker ps -aq --filter name=codex-ci-web- | xargs -r docker rm --force
+          docker ps -aq --filter name=codex-ci-all-in-one- | xargs -r docker rm --force
           docker ps -aq --filter name=codex-ci-cli- | xargs -r docker rm --force
           docker rm --force codex-ci-network-supported || true
 

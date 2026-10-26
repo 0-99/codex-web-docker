@@ -151,3 +151,64 @@ jobs:
           docker run --rm --volume "$volume_name:/home/node/.codex" \
             --entrypoint node codex-web-docker:smoke-${{ matrix.tag_suffix }} \
             -e 'const fs=require("node:fs"); if(fs.readFileSync("/home/node/.codex/volume-smoke", "utf8")!=="persisted") process.exit(1);'
+
+  all_in_one_smoke:
+    name: Smoke-test Web and CLI together (${{ matrix.platform }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag_suffix: amd64
+          - platform: linux/arm64
+            tag_suffix: arm64
+    steps:
+      - uses: actions/checkout@v5
+      - run: docker compose --file examples/all-in-one.compose.yml config --quiet
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+      - name: Build combined runtime
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: all-in-one
+          load: true
+          platforms: ${{ matrix.platform }}
+          tags: codex-web-all-in-one:smoke-${{ matrix.tag_suffix }}
+          build-args: SOURCE_REVISION=${{ github.sha }}
+          cache-from: type=gha,scope=all-in-one-${{ matrix.tag_suffix }}
+          cache-to: type=gha,mode=max,scope=all-in-one-${{ matrix.tag_suffix }}
+      - name: Verify both services and persistent homes
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=codex-web-all-in-one:smoke-${{ matrix.tag_suffix }}
+          container=codex-all-in-one-smoke
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm codex-all-cli codex-all-web codex-all-workspace >/dev/null 2>&1 || true' EXIT
+          for volume in codex-all-cli codex-all-web codex-all-workspace; do docker volume create "$volume" >/dev/null; done
+          docker run -d --name "$container" --network none \
+            --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
+            -v codex-all-cli:/home/node/.codex-cli \
+            -v codex-all-web:/home/node/.codex \
+            -v codex-all-workspace:/workspace \
+            -v codex-all-workspace:/home/node/Documents/Codex "$image"
+          test "$(docker exec "$container" codex --version)" = 'codex-cli 0.164.0'
+          for attempt in {1..60}; do
+            if docker exec "$container" /bin/sh -ec 'test -S /run/codex/app-server.sock && wget -Y off -q -O /dev/null http://127.0.0.1:8214/'; then break; fi
+            test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
+            sleep 1
+          done
+          docker exec "$container" /bin/sh -ec 'test "$(id -u)" = 1000; test -w "$CODEX_HOME"; test -w "$CODEX_WEB_USER_DATA_DIR"; echo persisted > /workspace/.smoke; test "$(cat /home/node/Documents/Codex/.smoke)" = persisted'
+          docker exec "$container" bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --dev /dev \
+            /bin/sh -ec 'test -r /workspace/.smoke'
+          docker restart "$container" >/dev/null
+          for attempt in {1..60}; do
+            if docker exec "$container" /bin/sh -ec 'test -S /run/codex/app-server.sock && wget -Y off -q -O /dev/null http://127.0.0.1:8214/ && test "$(cat /home/node/Documents/Codex/.smoke)" = persisted'; then exit 0; fi
+            sleep 1
+          done
+          docker logs "$container"
+          exit 1
