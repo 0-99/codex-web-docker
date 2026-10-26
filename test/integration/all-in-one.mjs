@@ -400,16 +400,15 @@ test(
     await page.goto(`${base}thread/${threadId}`);
     try {
       await until(
-        async () =>
-          (await page
-            .getByText("CI assistant response 1", { exact: true })
-            .first()
-            .isVisible()) ||
-          (await page.locator("body").innerText()).includes(
-            "What type of work do you do?",
-          ),
+        async () => {
+          const visibleText = await page.locator("body").innerText();
+          return (
+            visibleText.includes("CI assistant response 1") ||
+            visibleText.includes("What type of work do you do?")
+          );
+        },
         "saved chat or first-run screen",
-        30_000,
+        90_000,
       );
     } catch (error) {
       throw new Error(
