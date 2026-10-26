@@ -405,9 +405,9 @@ test(
             .getByText("CI assistant response 1", { exact: true })
             .first()
             .isVisible()) ||
-          (await page
-            .getByText("What type of work do you do?", { exact: true })
-            .isVisible()),
+          (await page.locator("body").innerText()).includes(
+            "What type of work do you do?",
+          ),
         "saved chat or first-run screen",
         30_000,
       );
@@ -418,9 +418,9 @@ test(
       );
     }
     if (
-      await page
-        .getByText("What type of work do you do?", { exact: true })
-        .isVisible()
+      (await page.locator("body").innerText()).includes(
+        "What type of work do you do?",
+      )
     ) {
       for (let step = 0; step < 8; step++) {
         const skip = page
