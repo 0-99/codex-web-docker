@@ -12,15 +12,13 @@ services:
       - systempaths=unconfined
     environment:
       CODEX_WEB_BASE_PATH: ${CODEX_WEB_BASE_PATH:-/}
+      CODEX_WEB_AUTH_ENABLED: ${CODEX_WEB_AUTH_ENABLED:-0}
+      # Set to 1 when the public browser URL uses HTTPS.
+      CODEX_WEB_AUTH_COOKIE_SECURE: ${CODEX_WEB_AUTH_COOKIE_SECURE:-0}
     volumes:
-      - codex_data:/home/node/.codex-cli
-      - codex_web_data:/home/node/.codex
-      - codex_workspace:/workspace
-      - codex_workspace:/home/node/Documents/Codex
+      - codex_all_data:/data
     ports:
       - "127.0.0.1:8214:8214"
 
 volumes:
-  codex_data:
-  codex_web_data:
-  codex_workspace:
+  codex_all_data:

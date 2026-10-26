@@ -23,6 +23,7 @@ import {
   pathAtBase,
 } from "./base-path";
 import { installWebRuntime } from "./web-runtime";
+import { installWebAuth } from "./web-auth";
 import { verifyLegacyWorkspaceRoute } from "./workspace-routing";
 import { normalizeLanguages, withBrowserLanguages } from "./electron/locale";
 
@@ -437,6 +438,7 @@ export async function startIpcBridgeServer(
   const app = Fastify({ logger: false });
   const websocketServer = new WebSocketServer({ noServer: true });
   const { basePath } = options;
+  const allowWebSocket = await installWebAuth(app, basePath);
   const basePathWithoutSlash = basePathWithoutTrailingSlash(basePath);
   const uploadPath = pathAtBase(basePath, "__backend/upload");
   const ipcPath = pathAtBase(basePath, "__backend/ipc");
@@ -540,6 +542,12 @@ export async function startIpcBridgeServer(
     const url = new URL(requestUrl, `http://${host}`);
     if (url.pathname !== ipcPath) {
       socket.destroy();
+      return;
+    }
+    if (!allowWebSocket(request)) {
+      socket.end(
+        "HTTP/1.1 401 Unauthorized\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+      );
       return;
     }
 

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Named volumes inherit these directories from the image. An empty writable
+# bind mount needs them created after Docker mounts it over /data.
+mkdir -p /data/cli /data/web /data/workspace /data/auth
+chmod 0700 /data/auth
+
 socket=/run/codex/app-server.sock
 rm -f "$socket"
 

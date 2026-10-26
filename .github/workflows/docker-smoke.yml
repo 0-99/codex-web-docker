@@ -182,29 +182,36 @@ jobs:
           build-args: SOURCE_REVISION=${{ github.sha }}
           cache-from: type=gha,scope=all-in-one-${{ matrix.tag_suffix }}
           cache-to: type=gha,mode=max,scope=all-in-one-${{ matrix.tag_suffix }}
-      - name: Verify both services and persistent homes
+      - name: Verify both services and the single persistent volume
         shell: bash
         run: |
           set -euo pipefail
           image=codex-web-all-in-one:smoke-${{ matrix.tag_suffix }}
           container=codex-all-in-one-smoke
-          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm codex-all-cli codex-all-web codex-all-workspace >/dev/null 2>&1 || true' EXIT
-          for volume in codex-all-cli codex-all-web codex-all-workspace; do docker volume create "$volume" >/dev/null; done
+          trap 'docker rm -f "$container" >/dev/null 2>&1 || true; docker volume rm codex-all-data >/dev/null 2>&1 || true' EXIT
+          docker volume create codex-all-data >/dev/null
           docker run -d --name "$container" --network none \
             --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
-            -v codex-all-cli:/home/node/.codex-cli \
-            -v codex-all-web:/home/node/.codex \
-            -v codex-all-workspace:/workspace \
-            -v codex-all-workspace:/home/node/Documents/Codex "$image"
+            -v codex-all-data:/data "$image"
+          test "$(docker inspect --format '{{len .Mounts}}' "$container")" = 1
           test "$(docker exec "$container" codex --version)" = 'codex-cli 0.164.0'
           for attempt in {1..60}; do
             if docker exec "$container" /bin/sh -ec 'test -S /run/codex/app-server.sock && wget -Y off -q -O /dev/null http://127.0.0.1:8214/'; then break; fi
             test "$(docker inspect --format '{{.State.Running}}' "$container")" = true
             sleep 1
           done
-          docker exec "$container" /bin/sh -ec 'test "$(id -u)" = 1000; test -w "$CODEX_HOME"; test -w "$CODEX_WEB_USER_DATA_DIR"; echo persisted > /workspace/.smoke; test "$(cat /home/node/Documents/Codex/.smoke)" = persisted'
-          docker exec "$container" bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --dev /dev \
-            /bin/sh -ec 'test -r /workspace/.smoke'
+          docker exec "$container" /bin/sh -ec 'test "$(id -u)" = 1000; test -w "$CODEX_HOME"; test -w "$CODEX_WEB_USER_DATA_DIR"; test -w /data/auth; test "$(readlink /workspace)" = /data/workspace; test "$(readlink /home/node/Documents/Codex)" = /data/workspace; echo persisted > /workspace/.smoke; test "$(cat /home/node/Documents/Codex/.smoke)" = persisted'
+          # GitHub's shared runner may deny unprivileged user/mount namespaces
+          # even when Docker permits the syscalls. Keep host-policy failures
+          # visible without treating them as an image regression.
+          if ! sandbox_result=$(docker exec "$container" bwrap --unshare-user --unshare-pid --ro-bind / / --proc /proc --dev /dev \
+            /bin/sh -ec 'test -r /workspace/.smoke' 2>&1); then
+            case "$sandbox_result" in
+              *'Failed to make / slave: Permission denied'*|*'Creating new namespace failed, likely because the kernel does not support user namespaces.'*)
+                echo "::warning::GitHub runner kernel policy blocks bubblewrap: $sandbox_result" ;;
+              *) echo "$sandbox_result"; exit 1 ;;
+            esac
+          fi
           docker restart "$container" >/dev/null
           for attempt in {1..60}; do
             if docker exec "$container" /bin/sh -ec 'test -S /run/codex/app-server.sock && wget -Y off -q -O /dev/null http://127.0.0.1:8214/ && test "$(cat /home/node/Documents/Codex/.smoke)" = persisted'; then exit 0; fi

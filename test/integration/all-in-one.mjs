@@ -90,14 +90,23 @@ test(
     const cliHome = path.join(root, "cli");
     const webHome = path.join(root, "web");
     const workspace = path.join(root, "workspace");
+    const authHome = path.join(root, "auth");
     const socketDir = path.join(root, "socket");
     // CLI 0.164.0 links from /run/codex to its protected socket directory.
     // Mount both paths so this host-side RPC test can follow that link.
-    const daemonDir = `/tmp/codex-daemon-${process.getuid()}`;
+    const daemonDir = "/tmp/codex-daemon-1000";
     await fs.mkdir(daemonDir, { recursive: true, mode: 0o700 });
+    if (process.getuid() === 0) await fs.chown(daemonDir, 1000, 1000);
     await fs.chmod(daemonDir, 0o700);
-    for (const directory of [cliHome, webHome, workspace, socketDir]) {
+    for (const directory of [
+      cliHome,
+      webHome,
+      workspace,
+      authHome,
+      socketDir,
+    ]) {
       await fs.mkdir(directory);
+      if (process.getuid() === 0) await fs.chown(directory, 1000, 1000);
       await fs.chmod(directory, directory === socketDir ? 0o700 : 0o777);
     }
     await fs.writeFile(
@@ -128,6 +137,10 @@ test(
         "requires_openai_auth = false",
       ].join("\n"),
     );
+    if (process.getuid() === 0) {
+      await fs.chown(path.join(cliHome, "auth.json"), 1000, 1000);
+      await fs.chown(path.join(cliHome, "config.toml"), 1000, 1000);
+    }
     const name = `codex-ci-all-in-one-${process.pid}`;
     docker([
       "run",
@@ -142,19 +155,15 @@ test(
       "--security-opt",
       "systempaths=unconfined",
       "-v",
-      `${cliHome}:/home/node/.codex-cli`,
-      "-v",
-      `${webHome}:/home/node/.codex`,
-      "-v",
-      `${workspace}:/workspace`,
-      "-v",
-      `${workspace}:/home/node/Documents/Codex`,
+      `${root}:/data`,
       "-v",
       `${socketDir}:/run/codex`,
       "-v",
       `${daemonDir}:${daemonDir}`,
       "-e",
       "CODEX_APP_SERVER_RETRY_DELAYS_MS=100",
+      "-e",
+      "CODEX_WEB_AUTH_ENABLED=1",
       image,
     ]);
     cleanup(() => docker(["rm", "-f", name]));
@@ -176,7 +185,8 @@ test(
           );
         try {
           return (
-            (await fetch(base)).ok && (await fs.stat(socketPath)).isSocket()
+            (await fetch(base, { headers: { Accept: "text/html" } })).ok &&
+            (await fs.stat(socketPath)).isSocket()
           );
         } catch {
           return false;
@@ -307,6 +317,25 @@ test(
     });
     cleanup(() => browser.close());
     const page = await browser.newPage({ locale: "en-US" });
+    assert.equal((await fetch(`${base}__backend/status`)).status, 401);
+    await page.goto(`${base}thread/${threadId}`);
+    await page.getByRole("heading", { name: "Set up Codex Web" }).waitFor();
+    const setupLogs = spawnSync("docker", ["logs", name], {
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+    const setupCode =
+      `${setupLogs.stdout ?? ""}${setupLogs.stderr ?? ""}`.match(
+        /First-run setup code: ([A-Za-z0-9_-]+)/,
+      )?.[1];
+    assert.ok(setupCode);
+    await page.getByLabel("Setup code").fill(setupCode);
+    await page.getByLabel("Username").fill("ci-admin");
+    await page
+      .getByLabel("Password (at least 12 characters)")
+      .fill("ci-long-password-123");
+    await page.getByRole("button", { name: "Continue" }).click();
+    await page.waitForURL(base);
     await page.goto(`${base}thread/${threadId}`);
     try {
       await until(
@@ -378,7 +407,8 @@ test(
       async () => {
         try {
           return (
-            (await fetch(base)).ok && (await fs.stat(socketPath)).isSocket()
+            (await fetch(base, { headers: { Accept: "text/html" } })).ok &&
+            (await fs.stat(socketPath)).isSocket()
           );
         } catch {
           return false;
@@ -394,6 +424,14 @@ test(
     });
     assert.match(JSON.stringify(saved), /CI assistant response 1/);
     const resumedPage = await browser.newPage({ locale: "en-US" });
+    await resumedPage.goto(`${base}thread/${threadId}`);
+    await resumedPage
+      .getByRole("heading", { name: "Sign in to Codex Web" })
+      .waitFor();
+    await resumedPage.getByLabel("Username").fill("ci-admin");
+    await resumedPage.getByLabel("Password").fill("ci-long-password-123");
+    await resumedPage.getByRole("button", { name: "Continue" }).click();
+    await resumedPage.waitForURL(base);
     await resumedPage.goto(`${base}thread/${threadId}`);
     await dismissDialogs(resumedPage);
     await resumedPage.evaluate(

@@ -123,8 +123,14 @@ USER root
 RUN --mount=type=secret,id=proxy_ca \
     if [ -s /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
     apk add --no-cache bash bubblewrap ca-certificates git openssh-client ripgrep tini \
-    && mkdir -p /home/node/.codex-cli /home/node/Documents/Codex /workspace /run/codex \
-    && chown -R node:node /home/node/.codex-cli /home/node/Documents/Codex /workspace /run/codex
+    && mkdir -p /data/cli /data/web /data/workspace /data/auth /home/node/Documents /run/codex \
+    && rmdir /home/node/.codex \
+    && ln -s /data/cli /home/node/.codex-cli \
+    && ln -s /data/web /home/node/.codex \
+    && ln -s /data/workspace /workspace \
+    && ln -s /data/workspace /home/node/Documents/Codex \
+    && chown -R node:node /data /run/codex \
+    && chmod 0700 /data/auth
 
 COPY --from=cli /usr/local/bin/codex /usr/local/bin/codex
 COPY --from=cli /usr/local/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host
@@ -135,14 +141,15 @@ ARG CODEX_CLI_VERSION=0.164.0
 RUN test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"
 
 ENV CODEX_HOME=/home/node/.codex-cli \
-    CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock
+    CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock \
+    CODEX_WEB_AUTH_DIR=/data/auth
 
 LABEL org.opencontainers.image.description="Codex Web and pinned Codex CLI in one container" \
       org.opencontainers.image.codex-cli-version="${CODEX_CLI_VERSION}"
 
 USER node
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD ["/bin/sh", "-ec", "test -S /run/codex/app-server.sock && node -e \"fetch(new URL(process.env.CODEX_WEB_BASE_PATH||'/', 'http://127.0.0.1:8214')).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+  CMD ["/bin/sh", "-ec", "test -S /run/codex/app-server.sock && node -e \"fetch(new URL(process.env.CODEX_WEB_BASE_PATH||'/', 'http://127.0.0.1:8214'),{headers:{Accept:'text/html'}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
 ENTRYPOINT ["/sbin/tini", "--", "/opt/codex-web/docker/all-in-one-entrypoint.sh"]
 CMD ["node", "src/server/main.js", "--host", "0.0.0.0", "--port", "8214"]
 

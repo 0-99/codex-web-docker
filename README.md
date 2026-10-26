@@ -26,7 +26,8 @@ a browser frontend for codex desktop, running on a machine you control.
 >
 > For a single-container installation, use the additional
 > [`all-in-one` image and Compose example](DOCKER.md#all-in-one-image).
-> It bundles the CI-supported CLI version with this Web build. The separate
+> It bundles the CI-supported CLI version with this Web build, uses one data
+> volume, and offers an optional Web login with browser-based setup. The separate
 > containers above remain the recommended deployment when process isolation
 > matters.
 
