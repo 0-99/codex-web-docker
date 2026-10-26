@@ -9,7 +9,9 @@ FROM --platform=$BUILDPLATFORM alpine:${ALPINE_VERSION} AS builder
 
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache \
       bash \
       curl \
       nodejs \
@@ -23,7 +25,13 @@ COPY . .
 ARG SOURCE_REVISION=unknown
 ENV VITE_CODEX_WEB_REVISION=$SOURCE_REVISION
 
-RUN npm ci --ignore-scripts --no-audit --no-fund \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then \
+      export SSL_CERT_FILE=/run/secrets/proxy_ca \
+             CURL_CA_BUNDLE=/run/secrets/proxy_ca \
+             NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; \
+    fi; \
+    npm ci --ignore-scripts --no-audit --no-fund \
     && npm rebuild sharp \
     && npm run test:docker-proxy \
     && npm run prepare \
@@ -40,7 +48,9 @@ FROM alpine:${ALPINE_VERSION} AS production-dependencies
 WORKDIR /opt/codex-web
 COPY package.json package-lock.json ./
 
-RUN apk add --no-cache \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache \
       g++ \
       make \
       nodejs \
@@ -50,14 +60,18 @@ RUN apk add --no-cache \
 
 # node-gyp expects common.gypi at the Node source root, while Alpine packages
 # it with the other headers. The link lets it reuse Alpine's local headers.
-RUN ln -s /usr/include/node/common.gypi /usr/common.gypi \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
+    ln -s /usr/include/node/common.gypi /usr/common.gypi \
     && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
     && npm_config_build_from_source=true npm_config_nodedir=/usr npm rebuild better-sqlite3 \
     && npm cache clean --force
 
 FROM alpine:${ALPINE_VERSION} AS runtime
 
-RUN apk add --no-cache nodejs \
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache nodejs \
     && addgroup -g 1000 node \
     && adduser -D -u 1000 -G node node \
     && mkdir -p /home/node/.codex \
@@ -98,3 +112,46 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD ["node", "-e", "fetch(new URL(process.env.CODEX_WEB_BASE_PATH||'/', 'http://127.0.0.1:8214')).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
 
 CMD ["node", "src/server/main.js", "--host", "0.0.0.0", "--port", "8214"]
+
+# Keep the existing, CLI-free runtime as Docker's default final stage. The
+# combined target is built explicitly with --target all-in-one.
+FROM ghcr.io/icoretech/codex-docker:0.164.0@sha256:6914e21df86000b9c10efb4a49ef36dfbb267b5ba04b9741ef3cf648855d9c83 AS cli
+
+FROM runtime AS all-in-one
+
+USER root
+RUN --mount=type=secret,id=proxy_ca \
+    if [ -s /run/secrets/proxy_ca ]; then export SSL_CERT_FILE=/run/secrets/proxy_ca; fi; \
+    apk add --no-cache bash bubblewrap ca-certificates git openssh-client ripgrep tini \
+    && mkdir -p /data/cli /data/web /data/workspace /data/auth /home/node/Documents /run/codex \
+    && rmdir /home/node/.codex \
+    && ln -s /data/cli /home/node/.codex-cli \
+    && ln -s /data/web /home/node/.codex \
+    && ln -s /data/workspace /workspace \
+    && ln -s /data/workspace /home/node/Documents/Codex \
+    && chown -R node:node /data /run/codex \
+    && chmod 0700 /data/auth
+
+COPY --from=cli /usr/local/bin/codex /usr/local/bin/codex
+COPY --from=cli /usr/local/bin/codex-code-mode-host /usr/local/bin/codex-code-mode-host
+COPY --from=cli /usr/local/bin/codex-bootstrap /usr/local/bin/codex-bootstrap
+COPY --chmod=0555 docker/all-in-one-entrypoint.sh /opt/codex-web/docker/all-in-one-entrypoint.sh
+
+ARG CODEX_CLI_VERSION=0.164.0
+RUN test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"
+
+ENV CODEX_HOME=/home/node/.codex-cli \
+    CODEX_APP_SERVER_URL=unix:///run/codex/app-server.sock \
+    CODEX_WEB_AUTH_DIR=/data/auth
+
+LABEL org.opencontainers.image.description="Codex Web and pinned Codex CLI in one container" \
+      org.opencontainers.image.codex-cli-version="${CODEX_CLI_VERSION}"
+
+USER node
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD ["/bin/sh", "-ec", "test -S /run/codex/app-server.sock && node -e \"fetch(new URL(process.env.CODEX_WEB_BASE_PATH||'/', 'http://127.0.0.1:8214'),{headers:{Accept:'text/html'}}).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\""]
+ENTRYPOINT ["/sbin/tini", "--", "/opt/codex-web/docker/all-in-one-entrypoint.sh"]
+CMD ["node", "src/server/main.js", "--host", "0.0.0.0", "--port", "8214"]
+
+# A plain `docker build .` must continue to produce only the Web frontend.
+FROM runtime AS web

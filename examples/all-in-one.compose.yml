@@ -1,0 +1,24 @@
+# One-container alternative to docker-compose.yml. The two-container stack
+# keeps the Web frontend under Docker's default security profile.
+services:
+  codex:
+    image: ${CODEX_ALL_IN_ONE_IMAGE:-0to99/codex-web-docker:all-in-one-edge}
+    init: false # The image already runs tini as PID 1.
+    restart: unless-stopped
+    security_opt:
+      # Codex's inner bubblewrap sandbox needs these Docker exceptions. They
+      # apply to the Web process as well because both run in this container.
+      - seccomp=unconfined
+      - systempaths=unconfined
+    environment:
+      CODEX_WEB_BASE_PATH: ${CODEX_WEB_BASE_PATH:-/}
+      CODEX_WEB_AUTH_ENABLED: ${CODEX_WEB_AUTH_ENABLED:-0}
+      # Set to 1 when the public browser URL uses HTTPS.
+      CODEX_WEB_AUTH_COOKIE_SECURE: ${CODEX_WEB_AUTH_COOKIE_SECURE:-0}
+    volumes:
+      - codex_all_data:/data
+    ports:
+      - "127.0.0.1:8214:8214"
+
+volumes:
+  codex_all_data:

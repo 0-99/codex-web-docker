@@ -23,6 +23,13 @@ a browser frontend for codex desktop, running on a machine you control.
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
 > for required CI checks and the separate, advisory upgrade candidate. Do not use
 > a floating `latest` tag as the supported CLI baseline.
+>
+> For a single-container installation, use the additional
+> [`all-in-one` image and Compose example](DOCKER.md#all-in-one-image).
+> It bundles the CI-supported CLI version with this Web build, uses one data
+> volume, and offers an optional Web login with browser-based setup. The separate
+> containers above remain the recommended deployment when process isolation
+> matters.
 
 https://github.com/user-attachments/assets/0a33cbd8-741c-412c-9e75-46dfe9324596
 

@@ -1,9 +1,9 @@
 # Docker image
 
-This fork publishes a CLI-free web frontend. The image never installs or starts
+The default image remains a CLI-free web frontend. It never installs or starts
 the Codex CLI. It starts only the browser frontend and its Electron-to-browser
 bridge, then connects that bridge to an independently managed `codex
-app-server`.
+app-server`. An additional [all-in-one image](#all-in-one-image) includes the CLI.
 
 The app-server does not have to run in Docker. It can run in another container,
 natively on the Docker host, or on another reachable system. Compatibility
@@ -386,6 +386,96 @@ These paths assume both containers run as UID 1000. For a custom numeric UID,
 adjust the daemon path in both mounts and the ownership of both socket volumes.
 The protected directory must be mounted at the same absolute path in both
 containers so the symlink resolves.
+## All-in-one image
+
+The optional image combines this Web build with the **same pinned CLI version**
+as the default Compose app-server (`0.164.0` at this revision). Both processes
+run as UID 1000 in one container and communicate over a private Unix socket;
+the CLI's protected socket target remains in the same container, so it needs no
+shared socket volume. The app-server does not expose a network port. One
+persistent volume at `/data` contains `cli/` (CLI login/history), `web/` (Web
+state), `workspace/` and `auth/`. The image maps `/workspace` and
+`/home/node/Documents/Codex` to the same `workspace/` directory. The image includes
+`codex`, `codex-code-mode-host`, `codex-bootstrap`, Bubblewrap, Git, SSH and
+Ripgrep. It supports `linux/amd64` and `linux/arm64`.
+
+```sh
+docker compose -f examples/all-in-one.compose.yml up -d
+docker compose -f examples/all-in-one.compose.yml exec codex codex-bootstrap device-auth
+docker compose -f examples/all-in-one.compose.yml exec codex codex-bootstrap status
+docker compose -f examples/all-in-one.compose.yml exec codex codex
+```
+
+Complete device authorization, trust `/workspace` in the interactive CLI, then
+open `http://127.0.0.1:8214/`. Set `CODEX_WEB_BASE_PATH` for a reverse-proxy
+subpath. The image's healthcheck requires both the Web endpoint and app-server
+socket. Restarting the container restarts both processes; the data volume retains
+authentication and thread history. The two-container example uses different
+volume names, so switching an existing installation requires an explicit data
+migration.
+
+### Optional Web login
+
+Set `CODEX_WEB_AUTH_ENABLED=1` in the project `.env` or Compose environment,
+then start the container. If no Web account exists, the Web URL opens a setup
+form instead of Codex. Read the one-time setup code with
+`docker compose -f examples/all-in-one.compose.yml logs codex` and enter it with
+a username and a password of at least 12 characters. The code changes on each
+restart until setup is complete. Credentials are stored as a salted password
+hash in `/data/auth/credentials.json`, never as a plaintext environment
+variable. This file persists in the same data volume. The CLI and Web process
+share UID 1000, so the CLI can read the hash; this login protects against
+access through the network, not against code already running in the container.
+
+The login protects static assets, API requests, uploads and the IPC WebSocket.
+Sessions last up to 12 hours, are cleared by a container restart, and use an
+HttpOnly, SameSite cookie. The Web UI includes **Sign out**. Set
+`CODEX_WEB_AUTH_COOKIE_SECURE=1` when the browser uses an HTTPS reverse proxy;
+leave it at `0` only for loopback HTTP or an encrypted VPN. Forward the original
+Host header and allow WebSocket upgrades. The login does not encrypt HTTP
+traffic: use HTTPS or a VPN before exposing the port on a network. The sample
+Compose file binds the port to loopback.
+
+To temporarily turn off the login, set `CODEX_WEB_AUTH_ENABLED=0` and recreate
+the container; the stored account remains. To reset a forgotten password, run
+`docker compose -f examples/all-in-one.compose.yml exec codex node /opt/codex-web/docker/web-auth-reset.mjs reset`,
+then restart the container and use its new setup code. If the container cannot
+start, use `docker compose -f examples/all-in-one.compose.yml run --rm --entrypoint node codex /opt/codex-web/docker/web-auth-reset.mjs reset` instead.
+
+### Moving from the earlier three-volume example
+
+Stop the old all-in-one container and back up its CLI, Web and workspace
+volumes. Create a fresh `codex_all_data` volume with this Compose file and copy
+the old CLI volume contents to `/data/cli`, Web contents to `/data/web`, and
+workspace contents to `/data/workspace`, preserving UID/GID 1000 and file modes.
+Do not mount an old CLI volume directly at `/data`: its files would be at the
+wrong level. Start the new container, verify login/history and workspace files,
+and retain the old volumes until the migration is confirmed. If using a bind
+mount instead, supply one host directory writable by UID/GID 1000 at `/data`;
+the image creates its subdirectories on first start.
+
+The default `all-in-one-edge` tag follows successfully tested `main` commits.
+Stable GitHub releases publish `all-in-one-<release-tag>` alongside the existing
+Web image tag. Set `CODEX_ALL_IN_ONE_IMAGE` to a stable tag to keep a specific Web
+build; neither tag updates a running container automatically. The CLI is pinned
+inside both image types and is upgraded only with the supported image/test pin
+after required integration checks. The image records its CLI version in the
+`org.opencontainers.image.codex-cli-version` label.
+
+Codex's inner Bubblewrap sandbox needs `seccomp=unconfined` and
+`systempaths=unconfined` in the tested Docker setup. **These settings apply to
+the entire all-in-one container, including the Web process.** The separate
+Compose stack confines the Web container with Docker's defaults, so it remains
+the recommended option when this separation matters. The all-in-one example
+binds Web to loopback only. Use the optional login with HTTPS or a VPN before
+making the UI reachable beyond a trusted network; anyone who can sign in can
+operate Codex with the container's permissions. Hosts that disable unprivileged
+user or mount namespaces can still block Bubblewrap despite these two Docker
+options; check the host policy if CLI commands report namespace errors.
+
+To build locally from the checked-out Web source, use
+`docker build --target all-in-one -t codex-web:all-in-one .`. A plain
+`docker build .` still builds the CLI-free Web image.
 
 ## Docker Hub publishing
 

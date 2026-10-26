@@ -1,6 +1,7 @@
 {
   "supported": {
     "image": "ghcr.io/icoretech/codex-docker:0.155.1",
+    "digest": "ghcr.io/icoretech/codex-docker@sha256:2b38d7fe47bf8de9eec6a0a10bd9794f6c02459f3d6d9ef33db349902639748f",
     "expectedCliVersion": "0.155.1"
   },
   "candidate": {
@@ -8,6 +9,7 @@
   },
   "supported-current": {
     "image": "ghcr.io/icoretech/codex-docker:0.164.0",
+    "digest": "ghcr.io/icoretech/codex-docker@sha256:6914e21df86000b9c10efb4a49ef36dfbb267b5ba04b9741ef3cf648855d9c83",
     "expectedCliVersion": "0.164.0"
   }
 }

@@ -55,6 +55,12 @@ export async function installWebRuntime(
           .send(body),
     );
   }
+  if (process.env.CODEX_WEB_AUTH_ENABLED === "1") {
+    html = html.replace(
+      "</head>",
+      `<script defer src="${pathAtBase(basePath, "__auth/logout.js")}"></script></head>`,
+    );
+  }
   const enabled = Boolean(process.env.CODEX_APP_SERVER_URL);
   let pairingInProgress = false;
   app.post(

@@ -193,10 +193,19 @@ export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
   });
   server.listen(socketPath);
   await once(server, "listening");
-  return { endpoint: `unix://${socketPath}`, directory, socketPath, requests, traffic };
+  return {
+    endpoint: `unix://${socketPath}`,
+    directory,
+    socketPath,
+    requests,
+    traffic,
+  };
 }
 
-async function modelServer() {
+export async function modelServer({
+  host = "127.0.0.1",
+  toolCallAt = null,
+} = {}) {
   const requests = [];
   const server = http.createServer(async (request, response) => {
     let body = "";
@@ -216,13 +225,23 @@ async function modelServer() {
     }
     requests.push(JSON.parse(body));
     const text = `CI assistant response ${requests.length}`;
-    const item = {
-      id: `message-${requests.length}`,
-      type: "message",
-      role: "assistant",
-      status: "completed",
-      content: [{ type: "output_text", text, annotations: [] }],
-    };
+    const toolCall = requests.length === toolCallAt;
+    const item = toolCall
+      ? {
+          id: `call-${requests.length}`,
+          type: "function_call",
+          call_id: `call-${requests.length}`,
+          name: "exec_command",
+          arguments: JSON.stringify({ cmd: "pwd", workdir: "/workspace" }),
+          status: "completed",
+        }
+      : {
+          id: `message-${requests.length}`,
+          type: "message",
+          role: "assistant",
+          status: "completed",
+          content: [{ type: "output_text", text, annotations: [] }],
+        };
     const result = {
       id: `response-${requests.length}`,
       object: "response",
@@ -245,35 +264,55 @@ async function modelServer() {
         "response.output_item.added",
         {
           output_index: 0,
-          item: { ...item, status: "in_progress", content: [] },
+          item: toolCall
+            ? { ...item, status: "in_progress", arguments: "" }
+            : { ...item, status: "in_progress", content: [] },
         },
       ],
-      [
-        "response.content_part.added",
-        {
-          item_id: item.id,
-          output_index: 0,
-          content_index: 0,
-          part: { type: "output_text", text: "", annotations: [] },
-        },
-      ],
-      [
-        "response.output_text.delta",
-        { item_id: item.id, output_index: 0, content_index: 0, delta: text },
-      ],
-      [
-        "response.output_text.done",
-        { item_id: item.id, output_index: 0, content_index: 0, text },
-      ],
-      [
-        "response.content_part.done",
-        {
-          item_id: item.id,
-          output_index: 0,
-          content_index: 0,
-          part: item.content[0],
-        },
-      ],
+      ...(toolCall
+        ? [
+            [
+              "response.function_call_arguments.delta",
+              { item_id: item.id, output_index: 0, delta: item.arguments },
+            ],
+            [
+              "response.function_call_arguments.done",
+              { item_id: item.id, output_index: 0, arguments: item.arguments },
+            ],
+          ]
+        : [
+            [
+              "response.content_part.added",
+              {
+                item_id: item.id,
+                output_index: 0,
+                content_index: 0,
+                part: { type: "output_text", text: "", annotations: [] },
+              },
+            ],
+            [
+              "response.output_text.delta",
+              {
+                item_id: item.id,
+                output_index: 0,
+                content_index: 0,
+                delta: text,
+              },
+            ],
+            [
+              "response.output_text.done",
+              { item_id: item.id, output_index: 0, content_index: 0, text },
+            ],
+            [
+              "response.content_part.done",
+              {
+                item_id: item.id,
+                output_index: 0,
+                content_index: 0,
+                part: item.content[0],
+              },
+            ],
+          ]),
       ["response.output_item.done", { output_index: 0, item }],
       ["response.completed", { response: result }],
     ];
@@ -283,16 +322,19 @@ async function modelServer() {
       );
     response.end();
   });
-  server.listen(0, "127.0.0.1");
+  server.listen(0, host);
   await once(server, "listening");
   return {
     requests,
-    url: `http://127.0.0.1:${server.address().port}/v1`,
+    url: `http://${host}:${server.address().port}/v1`,
     close: () => new Promise((r) => server.close(r)),
   };
 }
 
-export async function appServerFixture(t, { chatgptAuth, slowMcp = false } = {}) {
+export async function appServerFixture(
+  t,
+  { chatgptAuth, slowMcp = false } = {},
+) {
   assert.equal(
     process.env.CODEX_TEST_NETWORK_ISOLATED,
     "1",
@@ -427,7 +469,10 @@ export async function appServerFixture(t, { chatgptAuth, slowMcp = false } = {})
       // A live process can still reject the WebSocket handshake. Record only
       // transport diagnostics, never the CLI's potentially sensitive stderr.
       const socketExists = inContainer
-        ? await fs.access(socketPath).then(() => true, () => false)
+        ? await fs.access(socketPath).then(
+            () => true,
+            () => false,
+          )
         : undefined;
       const socketTarget = inContainer
         ? await fs.readlink(socketPath).catch(() => undefined)

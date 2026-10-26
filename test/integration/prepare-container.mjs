@@ -10,7 +10,7 @@ const config = JSON.parse(
 const requiredContainer =
   selected === "supported" || selected === "supported-current";
 assert.ok(requiredContainer || selected === "candidate");
-const { image, expectedCliVersion } = config[selected];
+const { image, digest: expectedDigest, expectedCliVersion } = config[selected];
 function docker(args) {
   return execFileSync("docker", args, {
     encoding: "utf8",
@@ -38,6 +38,19 @@ if (requiredContainer) {
     image,
     "Example Compose must select the requested supported image from images.json",
   );
+  if (selected === "supported-current") {
+    const dockerfile = await fs.readFile("Dockerfile", "utf8");
+    assert.ok(
+      dockerfile.includes(
+        `FROM ${image}@${expectedDigest.split("@")[1]} AS cli`,
+      ),
+      "All-in-one CLI source must use the current supported immutable digest",
+    );
+    assert.ok(
+      dockerfile.includes(`ARG CODEX_CLI_VERSION=${expectedCliVersion}`),
+      "All-in-one CLI version check must match the current supported image",
+    );
+  }
 }
 assert.deepEqual(cli.command, [
   "app-server",
@@ -70,6 +83,8 @@ const digest = inspected.RepoDigests.find((ref) =>
   ref.startsWith("ghcr.io/icoretech/codex-docker@sha256:"),
 );
 assert.ok(digest, "Record an immutable pulled image reference");
+if (expectedDigest)
+  assert.equal(digest, expectedDigest, "Supported image tag changed digest");
 const version = docker([
   "run",
   "--rm",
