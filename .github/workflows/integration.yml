@@ -78,7 +78,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        cli: [baseline, upstream, supported, candidate]
+        cli: [baseline, upstream, supported, supported-current, candidate]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -93,7 +93,7 @@ jobs:
       - run: npm run prepare
       - if: matrix.cli == 'baseline' || matrix.cli == 'upstream'
         run: node test/integration/install-cli.mjs ${{ matrix.cli }}
-      - if: matrix.cli == 'supported' || matrix.cli == 'candidate'
+      - if: matrix.cli == 'supported' || matrix.cli == 'supported-current' || matrix.cli == 'candidate'
         id: prepare_container
         continue-on-error: ${{ matrix.cli == 'candidate' }}
         run: node test/integration/prepare-container.mjs ${{ matrix.cli }}
@@ -114,7 +114,7 @@ jobs:
               test/integration/app-server.mjs test/integration/desktop.mjs
           ' integration "$integration_user" "$PATH" "$CODEX_TEST_CLI_PATH" "$integration_node"
       - name: Test actual image in its network namespace
-        if: matrix.cli == 'supported' || (matrix.cli == 'candidate' && steps.prepare_container.outcome == 'success')
+        if: matrix.cli == 'supported' || matrix.cli == 'supported-current' || (matrix.cli == 'candidate' && steps.prepare_container.outcome == 'success')
         id: container_test
         continue-on-error: ${{ matrix.cli == 'candidate' }}
         shell: bash
@@ -139,7 +139,7 @@ jobs:
           echo "Candidate preparation: **$PREPARE_RESULT**; integration: **$RESULT**." >> "$GITHUB_STEP_SUMMARY"
           echo "This is an advisory upgrade probe. Its result does not fail this workflow and does not change the supported image." >> "$GITHUB_STEP_SUMMARY"
       - name: Stop container test runtime
-        if: always() && (matrix.cli == 'supported' || matrix.cli == 'candidate')
+        if: always() && (matrix.cli == 'supported' || matrix.cli == 'supported-current' || matrix.cli == 'candidate')
         shell: bash
         run: |
           docker ps -aq --filter name=codex-ci-cli- | xargs -r docker rm --force

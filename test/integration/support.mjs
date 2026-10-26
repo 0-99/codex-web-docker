@@ -429,8 +429,11 @@ export async function appServerFixture(t, { chatgptAuth, slowMcp = false } = {})
       const socketExists = inContainer
         ? await fs.access(socketPath).then(() => true, () => false)
         : undefined;
+      const socketTarget = inContainer
+        ? await fs.readlink(socketPath).catch(() => undefined)
+        : undefined;
       throw new Error(
-        `${error.message}; socketExists=${socketExists}; lastSocketError=${lastSocketError?.message ?? "none"}; exitCode=${serverProcess.child.exitCode}`,
+        `${error.message}; socketExists=${socketExists}; socketTarget=${socketTarget ?? "none"}; lastSocketError=${lastSocketError?.message ?? "none"}; exitCode=${serverProcess.child.exitCode}`,
         { cause: error },
       );
     }
