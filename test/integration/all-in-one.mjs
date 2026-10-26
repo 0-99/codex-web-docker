@@ -1,14 +1,17 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFile, execFileSync, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import fs from "node:fs/promises";
 import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
+import { promisify } from "node:util";
 import { WebSocket } from "ws";
 import { chromium } from "playwright";
 import { fixtureCleanup, modelServer, rpcSocket, until } from "./support.mjs";
+
+const execFileAsync = promisify(execFile);
 
 function docker(args) {
   return execFileSync("docker", args, {
@@ -201,10 +204,11 @@ test(
     );
     assert.equal(docker(["exec", name, "id", "-u"]), "1000");
     await until(
-      () => {
+      async () => {
         try {
-          return /ci-model/.test(
-            docker([
+          const { stdout } = await execFileAsync(
+            "docker",
+            [
               "exec",
               name,
               "wget",
@@ -216,8 +220,10 @@ test(
               "-O",
               "-",
               `${model.url}/models`,
-            ]),
+            ],
+            { encoding: "utf8", timeout: 5_000 },
           );
+          return /ci-model/.test(stdout);
         } catch {
           return false;
         }
