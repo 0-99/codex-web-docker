@@ -99,21 +99,21 @@ test(
     const workspace = path.join(root, "workspace");
     const authHome = path.join(root, "auth");
     const socketDir = path.join(root, "socket");
-    // CLI 0.164.0 links from /run/codex to its protected socket directory.
-    // Mount both paths so this host-side RPC test can follow that link.
+    // Local development uses the protected socket directly. CI instead uses a
+    // loopback relay, because the runner UID differs from the container UID.
     const daemonDir = "/tmp/codex-daemon-1000";
-    await fs.mkdir(daemonDir, { recursive: true, mode: 0o700 });
-    if (process.getuid() === 0) await fs.chown(daemonDir, 1000, 1000);
-    await fs.chmod(daemonDir, 0o700);
+    if (localBridge) {
+      await fs.mkdir(daemonDir, { recursive: true, mode: 0o700 });
+      await fs.chmod(daemonDir, 0o700);
+    }
     for (const directory of [
       cliHome,
       webHome,
       workspace,
       authHome,
-      socketDir,
+      ...(localBridge ? [socketDir] : []),
     ]) {
       await fs.mkdir(directory);
-      if (process.getuid() === 0) await fs.chown(directory, 1000, 1000);
       await fs.chmod(directory, directory === socketDir ? 0o700 : 0o777);
     }
     await fs.writeFile(
@@ -144,11 +144,25 @@ test(
         "requires_openai_auth = false",
       ].join("\n"),
     );
-    if (process.getuid() === 0) {
-      await fs.chown(path.join(cliHome, "auth.json"), 1000, 1000);
-      await fs.chown(path.join(cliHome, "config.toml"), 1000, 1000);
-    }
+    docker([
+      "run",
+      "--rm",
+      "--network",
+      "none",
+      "--user",
+      "0",
+      "-v",
+      `${root}:/seed`,
+      "--entrypoint",
+      "/bin/sh",
+      image,
+      "-ec",
+      "chown -R 1000:1000 /seed/cli /seed/web /seed/workspace /seed/auth; chmod 700 /seed/auth",
+    ]);
     const name = `codex-ci-all-in-one-${process.pid}`;
+    const socketMounts = localBridge
+      ? ["-v", `${socketDir}:/run/codex`, "-v", `${daemonDir}:${daemonDir}`]
+      : [];
     docker([
       "run",
       "-d",
@@ -163,10 +177,7 @@ test(
       "systempaths=unconfined",
       "-v",
       `${root}:/data`,
-      "-v",
-      `${socketDir}:/run/codex`,
-      "-v",
-      `${daemonDir}:${daemonDir}`,
+      ...socketMounts,
       "-e",
       "CODEX_APP_SERVER_RETRY_DELAYS_MS=100",
       "-e",
@@ -181,6 +192,13 @@ test(
         `${name}:/tmp/local-model-server.mjs`,
       ]);
       docker(["exec", "-d", name, "node", "/tmp/local-model-server.mjs"]);
+    } else {
+      docker([
+        "cp",
+        "test/integration/socket-relay.mjs",
+        `${name}:/tmp/socket-relay.mjs`,
+      ]);
+      docker(["exec", "-d", name, "node", "/tmp/socket-relay.mjs"]);
     }
     const socketPath = path.join(socketDir, "app-server.sock");
     const base = `http://${process.env.CODEX_TEST_WEB_HOST || "127.0.0.1"}:8214/`;
@@ -193,7 +211,15 @@ test(
         try {
           return (
             (await fetch(base, { headers: { Accept: "text/html" } })).ok &&
-            (await fs.stat(socketPath)).isSocket()
+            (localBridge
+              ? (await fs.stat(socketPath)).isSocket()
+              : docker([
+                  "exec",
+                  name,
+                  "/bin/sh",
+                  "-ec",
+                  "test -S /run/codex/app-server.sock",
+                ]) === "")
           );
         } catch {
           return false;
@@ -236,10 +262,14 @@ test(
       15_000,
     );
     const connect = async () => {
-      const socket = new WebSocket("ws://localhost/rpc", {
-        createConnection: () => net.createConnection(socketPath),
-        perMessageDeflate: false,
-      });
+      const socket = localBridge
+        ? new WebSocket("ws://localhost/rpc", {
+            createConnection: () => net.createConnection(socketPath),
+            perMessageDeflate: false,
+          })
+        : new WebSocket("ws://127.0.0.1:45823/rpc", {
+            perMessageDeflate: false,
+          });
       await once(socket, "open");
       cleanup(() => socket.terminate());
       const rpc = rpcSocket(socket);
@@ -327,6 +357,15 @@ test(
     });
     cleanup(() => browser.close());
     const page = await browser.newPage({ locale: "en-US" });
+    const browserErrors = [];
+    page.on("pageerror", (error) => browserErrors.push(error.message));
+    page.on("response", (response) => {
+      if (response.status() >= 400 && response.url().startsWith(base)) {
+        browserErrors.push(
+          `${response.status()} ${new URL(response.url()).pathname}`,
+        );
+      }
+    });
     assert.equal((await fetch(`${base}__backend/status`)).status, 401);
     await page.goto(`${base}thread/${threadId}`);
     await page.getByRole("heading", { name: "Set up Codex Web" }).waitFor();
@@ -346,6 +385,18 @@ test(
       .fill("ci-long-password-123");
     await page.getByRole("button", { name: "Continue" }).click();
     await page.waitForURL(base);
+    assert.ok(
+      (await page.context().cookies(base)).some(
+        (cookie) => cookie.name === "codex_web_session",
+      ),
+      "browser retained the authenticated session cookie",
+    );
+    assert.equal(
+      await page.evaluate(
+        async () => (await fetch("/__backend/status")).status,
+      ),
+      200,
+    );
     await page.goto(`${base}thread/${threadId}`);
     try {
       await until(
@@ -362,7 +413,7 @@ test(
       );
     } catch (error) {
       throw new Error(
-        `${error.message}; state=${docker(["inspect", "--format", "{{.State.Status}}/{{.State.ExitCode}}", name])}; url=${page.url()}; visibleText=${(await page.locator("body").innerText()).slice(0, 1200)}; logs=${failureLogs(name)}`,
+        `${error.message}; state=${docker(["inspect", "--format", "{{.State.Status}}/{{.State.ExitCode}}", name])}; url=${page.url()}; visibleText=${(await page.locator("body").innerText()).slice(0, 1200)}; browserErrors=${browserErrors.slice(-16).join(" | ")}; logs=${failureLogs(name)}`,
         { cause: error },
       );
     }
@@ -413,12 +464,21 @@ test(
     docker(["restart", name]);
     if (localBridge)
       docker(["exec", "-d", name, "node", "/tmp/local-model-server.mjs"]);
+    else docker(["exec", "-d", name, "node", "/tmp/socket-relay.mjs"]);
     await until(
       async () => {
         try {
           return (
             (await fetch(base, { headers: { Accept: "text/html" } })).ok &&
-            (await fs.stat(socketPath)).isSocket()
+            (localBridge
+              ? (await fs.stat(socketPath)).isSocket()
+              : docker([
+                  "exec",
+                  name,
+                  "/bin/sh",
+                  "-ec",
+                  "test -S /run/codex/app-server.sock",
+                ]) === "")
           );
         } catch {
           return false;
