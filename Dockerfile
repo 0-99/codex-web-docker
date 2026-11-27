@@ -115,7 +115,7 @@ CMD ["node", "src/server/main.js", "--host", "0.0.0.0", "--port", "8214"]
 
 # Keep the existing, CLI-free runtime as Docker's default final stage. The
 # combined target is built explicitly with --target all-in-one.
-FROM ghcr.io/icoretech/codex-docker:0.164.0@sha256:6914e21df86000b9c10efb4a49ef36dfbb267b5ba04b9741ef3cf648855d9c83 AS cli
+FROM ghcr.io/icoretech/codex-docker:0.172.0@sha256:63b8bd0fe5c407d6505d6297eb6c8ed45b24b63cbc9cb36da93e67c993756c42 AS cli
 
 FROM runtime AS all-in-one
 
@@ -137,7 +137,7 @@ COPY --from=cli /usr/local/bin/codex-code-mode-host /usr/local/bin/codex-code-mo
 COPY --from=cli /usr/local/bin/codex-bootstrap /usr/local/bin/codex-bootstrap
 COPY --chmod=0555 docker/all-in-one-entrypoint.sh /opt/codex-web/docker/all-in-one-entrypoint.sh
 
-ARG CODEX_CLI_VERSION=0.164.0
+ARG CODEX_CLI_VERSION=0.172.0
 RUN test "$(codex --version)" = "codex-cli ${CODEX_CLI_VERSION}"
 
 ENV CODEX_HOME=/home/node/.codex-cli \

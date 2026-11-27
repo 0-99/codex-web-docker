@@ -57,8 +57,8 @@ The option is disabled by default; only the exact string `1` enables it. Unset,
 `0`, `false` and other values leave the additional path disabled. Compose lists
 it as a commented option and does not enable it automatically.
 
-The fork does not select this path by app-server version. `0.155.1` remains the
-concrete regression and supported-image test case, not a runtime allowlist.
+The fork does not select this path by app-server version. `0.155.1` is the
+historical reproduction, not a supported release or runtime allowlist.
 Compatibility with another version depends on its actual RPC responses and the
 same authenticated proof; enabling the option is not a blanket support claim.
 
@@ -101,20 +101,20 @@ version-independent verification, the unchanged upstream range, endpoint failure
 principals/policies and cancellation. Relay tests check unchanged capabilities
 and account/policy RPC forwarding.
 
-`test/integration/workspace-routing.mjs` runs with the actual supported image's
-CLI `0.155.1` in the existing loopback-only CI namespace. It uses synthetic
-ChatGPT credentials (rather than the old API-key/no-account fixture), reads the
-real account and requirements responses through the relay, executes the v0.4.2
-Desktop routing class with opt-in disabled and enabled, confirms that the
-additional path is blocked without opt-in, and starts a real CLI thread and turn
-against the local model fixture when enabled. The accounts endpoint's routing response is simulated and clearly
-marked as such. This proves binary/protocol integration, not routing entitlement
-for an existing live account.
+`test/integration/workspace-routing.mjs` now runs with the sole supported CLI
+`0.172.0` in the loopback-only CI namespace. It uses synthetic ChatGPT credentials,
+simulates the accounts-discovery endpoint locally, and reads the actual native
+routing and requirements replies through the relay. Native routing must work
+with either opt-in setting without invoking the historical legacy verifier. A real thread/turn against
+the local model fixture verifies CLI operation, and repeated account/policy reads
+verify unchanged forwarding. Unit tests retain the historical missing-field
+verification and successful native-routing cases. This does not validate routing
+entitlement for an existing live account.
 
 ### Permanent release checks
 
 Routine releases are gated by automated tests: both opt-in settings, successful
-routing verification and every rejection case, the actual supported CLI images,
+routing verification and every rejection case, the actual supported CLI image,
 and the existing real Desktop/browser flows (including starting chats and turns).
 Once the initial live acceptance below is complete, it is **not** a recurring
 manual release gate. These automated checks remain the ongoing regression guard.

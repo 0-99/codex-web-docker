@@ -34,17 +34,15 @@ cp -r scratch scratch-new-version-unmodified
 
 ## upgrading the codex-cli version
 
-this part can be run concurrently with the rest of the upgrade process. make
-sure to wait for its completion before doing validation. run it in a subagent.
+Target the latest published stable Codex CLI, independently of the CLI bundled
+with the Desktop archive. Only that release is supported; other versions may
+work without a support guarantee.
 
-run the following to get the version of the new codex-cli
-
-```bash
-scratch/ChatGPT.app/Contents/Resources/codex-cli/bin/codex --version
-```
-
-then update the `nix/codex/default.nix` file's `version` field and hashes to
-point to the new version.
+Update `nix/codex/default.nix` with that version and verified package checksums
+for all four platforms. Update `test/integration/images.json` with the companion
+image's immutable digest and actual CLI version, and use the same image/digest
+and version check in the all-in-one Docker target. Keep the Compose default,
+workflow labels, smoke assertions, README and DOCKER.md consistent.
 
 ## porting over patches
 
@@ -80,7 +78,7 @@ the patches were applied as expected.
 
 After preparing the extracted application, run `npm test`,
 `npm run build:browser` and `npm run test:browser-runtime`. Require the
-**Test real Desktop and app-server offline** workflow for both CLI versions and
+**Test real Desktop and app-server offline** workflow for the supported CLI release and
 all Docker platform checks before merging. The integration workflow completes
 the real browser flows automatically; its failure artifacts contain the screen
 and HTML needed to investigate failures. See the offline CI description below
@@ -117,8 +115,9 @@ For the external app-server integration, verify these invariants after a merge:
    the actual extracted Desktop in Playwright, rather than a modeled layout,
    and exercises persisted chats, mobile resizing, process restart recovery
    and the real connection screen's pairing action.
-6. Release publication also calls that workflow. Both binary CLI versions, both supported container images and all
-   Docker platform checks must pass before the image publishing job can run.
+6. Release publication also calls that workflow. The current native binary, its
+   supported companion image and all Docker platform checks must pass before
+   the image publishing job can run.
    Routine updates do not require repeating manual phone checks.
 
 Validation (after preparing the extracted application):
@@ -139,23 +138,17 @@ finite retry exhaustion, and creates/reuses a fresh named Codex-home volume.
 
 ### Offline integration CI
 
-The required container versions are recorded in `test/integration/images.json`:
-`supported-current` pins `ghcr.io/icoretech/codex-docker:0.164.0`; `supported`
-pins `ghcr.io/icoretech/codex-docker:0.155.1`. Both are required checks. The workflow
-executes each pulled image with its normal entrypoint and verifies its CLI version; it does not extract
-and substitute a host binary. The job summary records the immutable digest and
-reported CLI version. The image runs as the runner UID with a fresh test home
-and the repository mounted at the identical absolute path.
+The sole required container is recorded as `supported` in
+`test/integration/images.json`, currently `ghcr.io/icoretech/codex-docker:0.172.0`.
+The workflow executes the pulled image with its normal entrypoint and verifies
+its digest and CLI version; it does not substitute a host binary. The image runs
+as the runner UID with a fresh test home and the repository mounted at the
+identical absolute path. A separate native job tests the same CLI release.
 
-The same file defines a separate upgrade candidate, initially `:latest`. That
-matrix case is explicitly advisory (`continue-on-error`) because newer images
-may be incompatible. Its failure remains visible in its job, diagnostics and
-summary, but does not invalidate the supported baseline or promote the image.
-To propose an update, set a candidate tag, review its results, then change the
-supported image and expected CLI version in a PR; update the CLI service
-in `examples/docker-compose.yml` and the README reference at the same time.
-CI validates the standalone Compose file. The supported case must pass
-before Docker publication. Never replace the supported tag with `latest`.
+Historical CLI versions and floating upgrade candidates are outside the matrix.
+Propose a CLI update by changing all pins together and requiring the native,
+container, built Web image and all-in-one checks. Never replace the supported
+tag with `latest`.
 
 Container cases create a network namespace using a Docker container with
 `--network none`. The host test runner joins that namespace; each actual CLI
@@ -171,9 +164,8 @@ workspace aliases on a fresh named volume. Integration containers use the
 example's CLI security options. Account homes stay separate.
 
 `.github/workflows/integration.yml` prepares the actual Desktop and downloads
-checksum-pinned CLI packages for the previous distinct version from Git history
-and the current version read from `nix/codex/default.nix`. Both pins and hashes
-follow version upgrades automatically. It then starts a new Linux
+the checksum-pinned CLI package read from `nix/codex/default.nix`. The binary
+and companion image target the same stable release. It then starts a new Linux
 network namespace with loopback as its only interface. Tests fail closed if
 they are invoked without that isolation. Downloads and browser installation
 happen before entering the namespace; test execution has no internet access.
@@ -296,13 +288,12 @@ each cold start. Startup, onboarding and logo-animation inputs are observed by
 the test without changing their decisions. All diagnostics use isolated dummy
 accounts and a local model fixture.
 
-### Companion CLI 0.164.0
+### Current companion CLI and legacy socket migration
 
-The Compose image defaults to 0.164.0; `CODEX_CLI_VERSION=0.155.1` selects
-the other supported version. Both versions have required real-container tests
-and fresh-volume Compose probes. Keep 0.155.1 supported until an explicit later
-change removes it. Existing 0.155.1 deployments need not change their socket
-layout until they upgrade. This CLI publishes
+The Compose image defaults to 0.172.0, the sole supported CLI release. Both the
+native binary and actual companion image have required integration checks.
+Deployments using the original 0.155.1 layout must migrate when upgrading;
+those already on the 0.164.0 socket layout retain their mounts. The current CLI publishes
 an absolute rendezvous symlink into `/tmp/codex-daemon-<UID>`. Share this physical
 socket directory as well as the alias directory between the CLI and frontend;
 use UID/GID 1000 and mode 0700 for both tmpfs volumes. Existing stacks must
@@ -314,3 +305,12 @@ The container test shares the physical daemon directory with the host at the
 same path. The Compose probe checks that a separate container can resolve the
 symlink with only the declared mounts. Listener failures include the symlink
 target, connection error and app-server log.
+
+
+### Upstream sync on 2026-11-27
+
+Upstream main through `7045904` repairs the New Project folder picker, Electron
+HTTP request lifecycle, headless native-image startup and build preparation.
+Its attempted Desktop `26.1103.32239` upgrade was reverted upstream, so the
+bundled Desktop remains `26.1007.30912`. Preserve the fork locale context and
+both diagnostic environment names when resolving the Electron shim merge.

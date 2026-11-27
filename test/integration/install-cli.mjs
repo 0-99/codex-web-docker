@@ -6,36 +6,9 @@ import path from "node:path";
 
 // Only public, pinned packages are downloaded here. Test data is created later,
 // inside a network namespace with loopback as its only interface.
-let source = await fs.readFile("nix/codex/default.nix", "utf8");
-const baseline = process.argv[2] === "baseline";
-if (baseline) {
-  const current = source.match(/version = "([^"]+)"/)?.[1];
-  const history = execFileSync(
-    "git",
-    ["log", "--first-parent", "--format=%H", "--", "nix/codex/default.nix"],
-    { encoding: "utf8" },
-  )
-    .trim()
-    .split("\n");
-  let previous;
-  for (const revision of history) {
-    const candidate = execFileSync(
-      "git",
-      ["show", `${revision}:nix/codex/default.nix`],
-      { encoding: "utf8" },
-    );
-    const version = candidate.match(/version = "([^"]+)"/)?.[1];
-    if (version && version !== current) {
-      previous = candidate;
-      break;
-    }
-  }
-  assert.ok(
-    previous,
-    "Checkout full history to locate the previous distinct CLI pin",
-  );
-  source = previous;
-}
+// The native binary and companion container deliberately test the same stable
+// release. Historical Desktop pins are not supported compatibility targets.
+const source = await fs.readFile("nix/codex/default.nix", "utf8");
 const version = source.match(/version = "([^"]+)"/)?.[1];
 const hash = source.match(
   /x86_64-linux = \{[\s\S]*?hash = "sha256-([^"]+)"/,

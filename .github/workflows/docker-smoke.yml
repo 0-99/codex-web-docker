@@ -194,7 +194,7 @@ jobs:
             --security-opt seccomp=unconfined --security-opt systempaths=unconfined \
             -v codex-all-data:/data "$image"
           test "$(docker inspect --format '{{len .Mounts}}' "$container")" = 1
-          test "$(docker exec "$container" codex --version)" = 'codex-cli 0.164.0'
+          test "$(docker exec "$container" codex --version)" = 'codex-cli 0.172.0'
           for attempt in {1..60}; do
             if docker exec "$container" /bin/sh -ec 'test -S /run/codex/app-server.sock && wget -Y off -q -O /dev/null http://127.0.0.1:8214/'; then break; fi
             test "$(docker inspect --format '{{.State.Running}}' "$container")" = true

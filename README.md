@@ -4,7 +4,7 @@ a browser frontend for codex desktop, running on a machine you control.
 
 > This fork also provides a CLI-free multi-architecture Docker image
 > that connects to an external `codex app-server`. See [DOCKER.md](DOCKER.md).
-> [`ghcr.io/icoretech/codex-docker:0.164.0`](https://github.com/icoretech/codex-docker)
+> [`ghcr.io/icoretech/codex-docker:0.172.0`](https://github.com/icoretech/codex-docker)
 > is one possible companion image when running the Codex CLI in another
 > container, but it is not a dependency. The app-server does not have to run in
 > Docker; it can also run natively on the Docker host or on another reachable
@@ -15,14 +15,13 @@ a browser frontend for codex desktop, running on a machine you control.
 > default. Static assets, navigation, uploads, and WebSockets use the configured
 > path automatically.
 > The [example Compose file](examples/docker-compose.yml) provides a standalone stack,
-> with CLI `0.164.0` by default. Both `0.164.0` and `0.155.1` are supported
-> and required CI targets; set `CODEX_CLI_VERSION=0.155.1` in `.env` to select
-> the older version. Existing `0.155.1` deployments can keep their socket setup. Run
+> with CLI `0.172.0` by default. This is the sole supported and required CI target.
+> Other CLI versions may work, but are not tested or guaranteed. Run
 > `docker compose -f examples/docker-compose.yml up -d`; no existing networks
 > or volumes are required. See [first-time setup](DOCKER.md#docker-compose).
 > See [image compatibility and upgrades](DOCKER.md#app-server-image-compatibility-checks)
-> for required CI checks and the separate, advisory upgrade candidate. Do not use
-> a floating `latest` tag as the supported CLI baseline.
+> for the pinned baseline and upgrade checks. Do not use a floating `latest` tag
+> as the supported CLI baseline.
 >
 > For a single-container installation, use the additional
 > [`all-in-one` image and Compose example](DOCKER.md#all-in-one-image).
@@ -68,6 +67,10 @@ nix run github:0xcaff/codex-web
 ```
 
 then open <http://127.0.0.1:8214> in a browser.
+
+Electron shim call tracing is disabled by default. Set
+`CODEX_WEB_DEBUG_SHIM=1` to enable bounded diagnostic traces; these can contain
+request data. Application warnings and errors remain enabled.
 
 ### sign in
 

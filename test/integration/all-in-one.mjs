@@ -230,7 +230,7 @@ test(
     );
     assert.equal(
       docker(["exec", name, "codex", "--version"]),
-      "codex-cli 0.164.0",
+      "codex-cli 0.172.0",
     );
     assert.equal(docker(["exec", name, "id", "-u"]), "1000");
     await until(
