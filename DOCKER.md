@@ -48,13 +48,13 @@ volumes:
   - codex-daemon-socket:/tmp/codex-daemon-1000
 ```
 
-CLI 0.164.0 creates the physical socket under `/tmp/codex-daemon-<UID>`
-and leaves an absolute symlink at the `--listen` path. Both containers must
+Current CLI releases create the physical socket under `/tmp/codex-daemon-<UID>`
+and leave an absolute symlink at the `--listen` path. Both containers must
 mount that protected directory at the same absolute path in addition to
 `/run/codex`. Sharing only the alias produces a dangling link. The alias parent
 must also prevent group/other writes: use mode 0700, replacing the older 0770.
 Custom numeric UIDs must also change the daemon mount path and volume owner.
-For existing deployments, follow the [CLI 0.164.0 migration](#upgrading-an-existing-stack-to-cli-01640)
+For existing deployments, follow the [current CLI migration](#upgrading-an-existing-stack-to-cli-01720)
 before changing the image tag.
 
 ### Mobile Connect pairing
@@ -281,7 +281,7 @@ other cookie-based authentication gateway authorize the manifest request.
 The [example](examples/docker-compose.yml) starts both `codex-cli` and
 `codex-web`, with Compose-managed networks and volumes. No existing network,
 volume, reverse proxy or MCP credentials are required. If you already run the
-older stack, read the [migration steps](#upgrading-an-existing-stack-to-cli-01640)
+older stack, read the [migration steps](#upgrading-an-existing-stack-to-cli-01720)
 before deploying this example:
 
 
@@ -331,37 +331,26 @@ VPN in front of the web UI before exposing it beyond a trusted network.
 
 ### Choosing a supported CLI version
 
-Both **0.155.1 and 0.164.0** are supported during the transition. There is no
-requirement to upgrade an existing 0.155.1 installation or change its socket
-volumes while it stays on that version.
+Only **Codex CLI 0.172.0** is supported. The Compose example, all-in-one image,
+native test binary and real-container integration suite all target this release.
+Other CLI versions may still work; they are not tested or guaranteed.
 
-The example defaults to 0.164.0. To select the older supported version, set
-this in the Compose project's `.env` file:
+The example selects `CODEX_CLI_VERSION=0.172.0` by default. Remove an older
+`CODEX_CLI_VERSION` override from the Compose project's `.env`, or update it to
+`0.172.0`. Deployments already using the 0.164.0 socket layout keep those mounts.
+Deployments using the original 0.155.1 layout also need the migration below.
 
-```dotenv
-CODEX_CLI_VERSION=0.155.1
-```
-
-Use `CODEX_CLI_VERSION=0.164.0` for the newer version. The updated example's
-two socket volumes and mode 0700 work with both versions; 0.155.1 simply does
-not use the protected daemon directory. CI requires the real-container tests
-and the fresh-volume Compose probes to pass for both versions.
-
-Changing an existing 0.155.1 deployment to 0.164.0 also requires the socket
-migration below. Changing back to 0.155.1 can retain the updated volume layout.
-Support for the older version should only be removed in an explicit later change.
-
-### Upgrading an existing stack to CLI 0.164.0
+### Upgrading an existing stack to CLI 0.172.0
 
 CLI 0.155.1 placed the socket directly at `/run/codex/app-server.sock`.
-CLI 0.164.0 leaves a symlink there and places the physical socket in
+CLI 0.172.0 leaves a symlink there and places the physical socket in
 `/tmp/codex-daemon-1000/`. Containers have separate `/tmp` directories;
 sharing only the old volume therefore exposes the link without its target.
 
 Update an existing Docker Compose deployment as follows:
 
-1. Set `CODEX_CLI_VERSION=0.164.0` in `.env` when using the example, or set
-   the CLI image to `ghcr.io/icoretech/codex-docker:0.164.0` in your own Compose file.
+1. Set `CODEX_CLI_VERSION=0.172.0` in `.env` when using the example, or set
+   the CLI image to `ghcr.io/icoretech/codex-docker:0.172.0` in your own Compose file.
 2. Keep `codex_socket:/run/codex` in both services and add
    `codex_daemon:/tmp/codex-daemon-1000` to **both** services.
 3. Add the top-level `codex_daemon` volume definition from the
@@ -389,7 +378,7 @@ containers so the symlink resolves.
 ## All-in-one image
 
 The optional image combines this Web build with the **same pinned CLI version**
-as the default Compose app-server (`0.164.0` at this revision). Both processes
+as the default Compose app-server (`0.172.0` at this revision). Both processes
 run as UID 1000 in one container and communicate over a private Unix socket;
 the CLI's protected socket target remains in the same container, so it needs no
 shared socket volume. The app-server does not expose a network port. One
@@ -498,29 +487,19 @@ pull the new image and recreate the web container to use it.
 
 ### App-server image compatibility checks
 
-Both companion images `0.164.0` and `0.155.1` are supported (`linux/amd64`).
-Each has a required real-container integration case; failures in either block
-release publication. The floating `latest` probe remains advisory.
-The previous `0.155.1` baseline passed on 2026-10-18:
-[validation run](https://github.com/0-99/codex-web-docker/actions/runs/39134630198).
-This validates the covered local workflows. Shell-tool execution inside the
-CLI sandbox, live account enrollment and known failures outside these flows
-need separate regression cases; see the container sandbox configuration above.
+The sole supported companion image is `ghcr.io/icoretech/codex-docker:0.172.0`.
+`test/integration/images.json` records its immutable digest and expected CLI
+version. The all-in-one image uses the same source digest; the native Nix/CI
+binary is checksum-pinned to the same CLI release.
 
-The [standalone Compose example](examples/docker-compose.yml) pins `codex-cli`
-to `ghcr.io/icoretech/codex-docker:0.164.0` by default and uses a shared Unix socket, also
-required by the Mobile Connect fallback. See [setup](#docker-compose).
+Required integration checks cover chat creation, saved history, restart/reconnect,
+mobile layout, reload and offline pairing using both the native binary and the
+actual companion image. Additional checks cover the built Web image, MCP startup
+timeouts, workspace routing, and the combined image. CI verifies the Compose
+version, fresh tmpfs socket permissions, cross-container socket links and shared
+workspace aliases. Failures block publication.
 
-`test/integration/images.json` pins `supported-current` to version `0.164.0` and
-`supported` to version `0.155.1`. CI runs both actual images through chat
-creation, saved history, restart/reconnect, mobile layout, reload and the offline
-pairing flow. The job summary reports its pulled digest and actual CLI version. CI also
-checks the Compose CLI image pin, creates the configured tmpfs socket volume,
-checks its permissions with default UID 1000, starts the actual listener and
-checks both workspace aliases on a fresh named volume. Container integration
-tests also apply the CLI security options from the example.
-The separate `candidate` case probes a prospective update (initially `:latest`)
-and is advisory. A candidate failure does not change the supported pin or any
-deployment. Propose image upgrades by changing the candidate first, then promote
-a verified version to the supported pin in a PR. Its required tests gate image
-publication. Live OpenAI enrollment and phone sign-in remain outside the suite.
+To update the supported release, change the image/digest, native package checksums,
+Compose default, all-in-one version check and documentation together. Older CLI
+versions and floating `latest` images are not compatibility targets. Live OpenAI
+enrollment and phone sign-in remain outside the offline suite.

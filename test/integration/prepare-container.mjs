@@ -7,16 +7,18 @@ const selected = process.argv[2];
 const config = JSON.parse(
   await fs.readFile(new URL("./images.json", import.meta.url), "utf8"),
 );
-const requiredContainer =
-  selected === "supported" || selected === "supported-current";
-assert.ok(requiredContainer || selected === "candidate");
+assert.equal(
+  selected,
+  "supported",
+  "Only the current CLI is a supported target",
+);
 const { image, digest: expectedDigest, expectedCliVersion } = config[selected];
 function docker(args) {
   return execFileSync("docker", args, {
     encoding: "utf8",
     env: {
       ...process.env,
-      ...(requiredContainer ? { CODEX_CLI_VERSION: expectedCliVersion } : {}),
+      CODEX_CLI_VERSION: expectedCliVersion,
     },
     maxBuffer: 4 * 1024 * 1024,
   }).trim();
@@ -32,26 +34,20 @@ const compose = JSON.parse(
   ]),
 );
 const cli = compose.services["codex-cli"];
-if (requiredContainer) {
-  assert.equal(
-    cli.image,
-    image,
-    "Example Compose must select the requested supported image from images.json",
-  );
-  if (selected === "supported-current") {
-    const dockerfile = await fs.readFile("Dockerfile", "utf8");
-    assert.ok(
-      dockerfile.includes(
-        `FROM ${image}@${expectedDigest.split("@")[1]} AS cli`,
-      ),
-      "All-in-one CLI source must use the current supported immutable digest",
-    );
-    assert.ok(
-      dockerfile.includes(`ARG CODEX_CLI_VERSION=${expectedCliVersion}`),
-      "All-in-one CLI version check must match the current supported image",
-    );
-  }
-}
+assert.equal(
+  cli.image,
+  image,
+  "Example Compose must select the supported image from images.json",
+);
+const dockerfile = await fs.readFile("Dockerfile", "utf8");
+assert.ok(
+  dockerfile.includes(`FROM ${image}@${expectedDigest.split("@")[1]} AS cli`),
+  "All-in-one CLI source must use the supported immutable digest",
+);
+assert.ok(
+  dockerfile.includes(`ARG CODEX_CLI_VERSION=${expectedCliVersion}`),
+  "All-in-one CLI version check must match the supported image",
+);
 assert.deepEqual(cli.command, [
   "app-server",
   "--listen",
@@ -98,7 +94,7 @@ if (expectedCliVersion)
 console.log(`${selected}: ${image}\nDigest: ${digest}\n${version}`);
 // Exercise the example's fresh volumes with the image's default user. These
 // probes have no network, account credentials or model requests.
-if (requiredContainer) {
+{
   const socket = `codex-ci-socket-${process.pid}`;
   const workspace = `codex-ci-workspace-${process.pid}`;
   const daemon = `codex-ci-daemon-${process.pid}`;
@@ -181,9 +177,7 @@ if (requiredContainer) {
       "/bin/sh",
       digest,
       "-ec",
-      selected === "supported-current"
-        ? 'test -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock && test -S "$(readlink /run/codex/app-server.sock)"'
-        : "test ! -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock",
+      'test -L /run/codex/app-server.sock && test -S /run/codex/app-server.sock && test -S "$(readlink /run/codex/app-server.sock)"',
     ]);
     console.log(
       "Compose default UID 1000, tmpfs socket, healthcheck and both workspace paths verified",
@@ -253,5 +247,5 @@ await fs.appendFile(
 if (process.env.GITHUB_STEP_SUMMARY)
   await fs.appendFile(
     process.env.GITHUB_STEP_SUMMARY,
-    `### ${selected} container\n\n- Requested: \`${image}\`\n- Executed: \`${digest}\`\n- Version: \`${version}\`\n\n${selected === "candidate" ? "Advisory upgrade probe only; this does not change the supported image.\n" : "Required compatibility baseline.\n"}`,
+    `### ${selected} container\n\n- Requested: \`${image}\`\n- Executed: \`${digest}\`\n- Version: \`${version}\`\n\nRequired compatibility baseline.\n`,
   );

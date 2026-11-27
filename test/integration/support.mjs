@@ -205,11 +205,26 @@ export async function pairingGateway(t, appServer, { delayMethods = {} } = {}) {
 export async function modelServer({
   host = "127.0.0.1",
   toolCallAt = null,
+  accountRouting,
 } = {}) {
   const requests = [];
   const server = http.createServer(async (request, response) => {
     let body = "";
     for await (const chunk of request) body += chunk;
+    // Current ChatGPT-authenticated CLIs discover routing before account/read
+    // returns. Simulate that backend endpoint inside the isolated namespace;
+    // the CLI itself must construct the native workspaceRouting response.
+    if (
+      accountRouting &&
+      new URL(request.url, "http://localhost").pathname.endsWith(
+        "/accounts/check",
+      )
+    ) {
+      response
+        .writeHead(200, { "Content-Type": "application/json" })
+        .end(JSON.stringify({ accounts: [accountRouting] }));
+      return;
+    }
     if (request.url.endsWith("/models")) {
       response.writeHead(200, { "Content-Type": "application/json" }).end(
         JSON.stringify({
@@ -333,7 +348,7 @@ export async function modelServer({
 
 export async function appServerFixture(
   t,
-  { chatgptAuth, slowMcp = false } = {},
+  { chatgptAuth, accountRouting, slowMcp = false } = {},
 ) {
   assert.equal(
     process.env.CODEX_TEST_NETWORK_ISOLATED,
@@ -384,7 +399,7 @@ export async function appServerFixture(
   assert.ok(
     schema.definitions.RemoteControlPairingStartParams.properties.manualCode,
   );
-  const model = await modelServer();
+  const model = await modelServer({ accountRouting });
   cleanup(() => model.close());
   await fs.writeFile(
     path.join(codexHome, "auth.json"),
@@ -400,6 +415,9 @@ export async function appServerFixture(
       'approval_policy = "never"',
       'sandbox_mode = "read-only"',
       'cli_auth_credentials_store = "file"',
+      ...(accountRouting
+        ? [`chatgpt_base_url = ${JSON.stringify(model.url)}`]
+        : []),
       "[features]",
       "plugins = false",
       "remote_plugin = false",

@@ -21,7 +21,7 @@ import {
 } from "../support/workspace-routing.mjs";
 
 test(
-  "real CLI 0.155.1 through the relay and v0.4.2 Desktop routing: ChatGPT account, verified route and turn",
+  "current CLI through the relay: ChatGPT account, native routing and turn",
   { timeout: 120000 },
   async (t) => {
     const binary = process.env.CODEX_TEST_CLI_PATH;
@@ -38,14 +38,18 @@ test(
       env: { ...process.env, CODEX_HOME: versionHome },
       timeout: 30000,
     }).trim();
-    if (version !== "codex-cli 0.155.1") {
-      t.skip(
-        "This regression fixture targets supported CLI 0.155.1; version-independent opt-in is covered by unit tests",
-      );
-      return;
-    }
+    const { supported } = JSON.parse(
+      await fs.readFile(new URL("./images.json", import.meta.url), "utf8"),
+    );
+    assert.equal(version, `codex-cli ${supported.expectedCliVersion}`);
     const accessToken = token();
+    const backendOrigin = "https://workspace.example.invalid";
     const server = await appServerFixture(t, {
+      accountRouting: {
+        id: "ci-account",
+        workspace_backend_origin: backendOrigin,
+        account_routing_override: "us",
+      },
       chatgptAuth: {
         auth_mode: "chatgpt",
         tokens: {
@@ -91,10 +95,14 @@ test(
     const account = await rpc.call("account/read", { refreshToken: false });
     const requirements = await rpc.call("configRequirements/read", {});
     assert.equal(account.account.type, "chatgpt");
-    assert.equal(Object.hasOwn(account, "workspaceRouting"), false);
+    assert.deepEqual(account.workspaceRouting, {
+      chatgptAccountId: "ci-account",
+      backendOrigin,
+      accountRoutingOverride: "us",
+    });
     assert.equal(requirements.requirements, null);
     const client = {
-      appServerVersion: "0.155.1",
+      appServerVersion: supported.expectedCliVersion,
       getAuthToken: async () =>
         (
           await rpc.call("getAuthStatus", {
@@ -116,25 +124,22 @@ test(
         return Response.json(accounts());
       },
     );
-    // Off is the production default: no extra backend discovery is attempted.
-    const disabled = routingClient(client);
-    await assert.rejects(
-      disabled.get(false),
-      /Workspace routing is unavailable/,
-    );
+    // Native routing must work with either opt-in setting, without invoking
+    // the historical missing-capability verifier.
+    for (const env of [{}, optInEnv]) {
+      const auth = await routingClient(client, env).get(false);
+      const headers = {};
+      assert.equal(
+        routeUrl(
+          new URL("/backend-api/settings/user", accountUrl).href,
+          headers,
+          auth,
+        ),
+        `${backendOrigin}/backend-api/settings/user`,
+      );
+      assert.equal(headers["X-OpenAI-Account-Routing-Override"], "us");
+    }
     assert.equal(discoveries, 0);
-    const routing = routingClient(client, optInEnv);
-    const auth = await routing.get(false);
-    assert.equal(auth.routing.kind, "legacy");
-    assert.equal(discoveries, 1);
-    assert.equal(
-      routeUrl(
-        new URL("/backend-api/settings/user", accountUrl).href,
-        {},
-        auth,
-      ),
-      new URL("/backend-api/settings/user", accountUrl).href,
-    );
     const started = await rpc.call("thread/start", {
       cwd: server.workspace,
       model: "ci-model",

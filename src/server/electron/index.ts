@@ -1,6 +1,8 @@
 import os from "node:os";
 import path from "node:path";
+import { inspect } from "node:util";
 import { preferredLanguages } from "./locale";
+import { NetRequest } from "./net-request";
 
 type StubFunction = (...args: unknown[]) => unknown;
 type StubListener = (...args: unknown[]) => void;
@@ -73,9 +75,20 @@ function getIpcMainBridgeState(): IpcMainBridgeState {
 }
 
 function log(method: string, args: unknown[]): void {
-  if (process.env.CODEX_WEB_ELECTRON_DEBUG === "1") {
-    console.log(`[electron-main-stub] ${method}`, args);
-  }
+  // Preserve the fork's diagnostic switch while accepting the upstream name.
+  if (
+    process.env.CODEX_WEB_DEBUG_SHIM !== "1" &&
+    process.env.CODEX_WEB_ELECTRON_DEBUG !== "1"
+  )
+    return;
+  const details = inspect(args, {
+    depth: 2,
+    maxArrayLength: 10,
+    maxStringLength: 200,
+    breakLength: Infinity,
+    compact: true,
+  }).replaceAll("\n", " ");
+  console.log(`[electron-main-stub] ${method} ${details}`.slice(0, 2000));
 }
 
 function createDeepStub(pathLabel: string): StubFunction {
@@ -858,28 +871,8 @@ const net = {
     }
     return new Response("", { status: 204 });
   },
-  request(...args: unknown[]): {
-    getHeader: (name: string) => string | undefined;
-    once: (event: string, listener: StubListener) => unknown;
-    setHeader: (name: string, value: string) => void;
-  } {
-    // log("net.request", args);
-    const headers = new Map<string, string>();
-    const request = {
-      setHeader(name: string, value: string): void {
-        // log("net.request.setHeader", [name, value]);
-        headers.set(name.toLowerCase(), value);
-      },
-      getHeader(name: string): string | undefined {
-        // log("net.request.getHeader", [name]);
-        return headers.get(name.toLowerCase());
-      },
-      once(event: string, listener: StubListener): unknown {
-        // log("net.request.once", [event, listener]);
-        return request;
-      },
-    };
-    return request;
+  request(options: ConstructorParameters<typeof NetRequest>[0]): NetRequest {
+    return new NetRequest(options);
   },
 };
 
@@ -902,7 +895,8 @@ const nativeImage = {
   createFromPath(imagePath: string): { isEmpty: () => boolean } {
     log("nativeImage.createFromPath", [imagePath]);
     return {
-      isEmpty: () => !imagePath,
+      // Image decoding is unsupported in the headless host.
+      isEmpty: () => true,
     };
   },
 };
