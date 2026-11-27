@@ -41,6 +41,25 @@ function listedThreadIds(listing) {
   return new Set(rows.map((thread) => thread.id));
 }
 
+// A fresh Web profile can show onboarding or a model promotion again after
+// navigation. Dismiss it through real controls; forcing the chat click would
+// conceal the modal and stop exercising normal browser interaction.
+async function dismissDialogs(page) {
+  for (let step = 0; step < 8; step++) {
+    const overlay = page.locator('.codex-dialog-overlay[data-state="open"]').first();
+    if (!(await overlay.isVisible())) return;
+    const keepModel = page.getByRole("button", {
+      name: "Continue with current model", exact: true,
+    });
+    const skip = page.getByRole("button", {
+      name: /^(Skip|Skip setup|Skip for now|Not now|Maybe later|Close)$/i,
+    }).last();
+    if (await keepModel.isVisible()) await keepModel.click();
+    else if (await skip.isVisible()) await skip.click();
+    else await page.keyboard.press("Escape");
+  }
+}
+
 test("built Web runtime opens a saved chat and creates exactly one new chat", { timeout: 240_000 }, async (t) => {
   assert.equal(process.env.CODEX_TEST_NETWORK_ISOLATED, "1");
   const image = process.env.CODEX_TEST_WEB_IMAGE_REF;
@@ -139,6 +158,12 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
   server.cleanup(() => browser.close());
   const page = await browser.newPage({ locale: "en-US" });
   page.setDefaultTimeout(45_000);
+  // Promotions can arrive after the chat becomes visible, so also handle them
+  // immediately before Playwright attempts an otherwise blocked action.
+  await page.addLocatorHandler(
+    page.getByRole("button", { name: "Continue with current model", exact: true }),
+    (button) => button.click(),
+  );
   const pageErrors = [];
   page.on("pageerror", (error) => pageErrors.push(error.name));
   let startsBeforeNewClick = null;
@@ -166,12 +191,15 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
 
     // Navigate away, then select the saved chat through a real sidebar element.
     await page.goto(base);
+    await dismissDialogs(page);
     const threadLink = page.locator(`[href*="${threadId}"], [data-thread-id="${threadId}"]`).first();
     const threadTitle = page.getByText("Create the saved CI conversation.", { exact: false }).first();
     await until(async () => (await threadLink.isVisible()) || (await threadTitle.isVisible()), "saved chat in sidebar", 45_000);
+    await dismissDialogs(page);
     if (await threadLink.isVisible()) await threadLink.click();
     else await threadTitle.click();
     await page.getByText("CI assistant response 1", { exact: true }).first().waitFor();
+    await dismissDialogs(page);
     const composer = page.locator('[contenteditable="true"]:visible').first();
     await composer.fill("Continue the saved CI conversation.");
     await page.getByRole("button", { name: "Send", exact: true }).click();
@@ -230,8 +258,9 @@ test("built Web runtime opens a saved chat and creates exactly one new chat", { 
         threadSourceType: typeof message.params?.threadSource,
         parametersHash: createHash("sha256").update(JSON.stringify(message.params ?? {})).digest("hex").slice(0, 12),
       }));
+    const dialogs = await page.getByRole("dialog").allTextContents().catch(() => []);
     throw new Error(
-      `${error.message}\nWeb state: ${JSON.stringify(containerState(name))}\nRPC methods: ${JSON.stringify(methods)}\nThread starts: ${JSON.stringify(starts)}\nStarts before/after New click: ${startsBeforeNewClick}/${startsAfterNewClick}\nPersisted thread counts before/after: ${initialThreads.size}/${persistedAfterCount}\nRPC trace: ${JSON.stringify(safeRpcTrace(name))}\nWeb diagnostics: ${JSON.stringify(safeWebDiagnostics(name))}\nBrowser error types: ${JSON.stringify(pageErrors)}`,
+      `${error.message}\nVisible dialogs: ${JSON.stringify(dialogs.map((text) => text.slice(0, 1500)))}\nWeb state: ${JSON.stringify(containerState(name))}\nRPC methods: ${JSON.stringify(methods)}\nThread starts: ${JSON.stringify(starts)}\nStarts before/after New click: ${startsBeforeNewClick}/${startsAfterNewClick}\nPersisted thread counts before/after: ${initialThreads.size}/${persistedAfterCount}\nRPC trace: ${JSON.stringify(safeRpcTrace(name))}\nWeb diagnostics: ${JSON.stringify(safeWebDiagnostics(name))}\nBrowser error types: ${JSON.stringify(pageErrors)}`,
       { cause: error },
     );
   }
